@@ -1,0 +1,8 @@
+.venv/
+data/
+NatureCommunications/
+.env
+
+**/__pycache__/
+
+___*.py
