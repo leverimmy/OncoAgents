@@ -1,7 +1,7 @@
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
-from client import *
+from backend import *
 from prompt import *
-from tools import *
+from MDT.tools import *
 from rag_module import get_persistent_memory
 
 # 影像科医生
@@ -9,7 +9,7 @@ radiologist_memory = get_persistent_memory("radiologist")
 radiologist_agent = AssistantAgent(
     name="radiologist_agent",
     model_client=model_client,
-    tools=[google_search, segment_images],
+    tools=[google_search],
     system_message=RADIOLOGIST_SYSTEM_MESSAGE,
     reflect_on_tool_use=True,
     max_tool_iterations=5,
@@ -22,7 +22,7 @@ pathologist_memory = get_persistent_memory("pathologist")
 pathologist_agent = AssistantAgent(
     name="pathologist_agent",
     model_client=model_client,
-    tools=[google_search, analyze_mutation],
+    tools=[google_search],
     system_message=PATHOLOGIST_SYSTEM_MESSAGE,
     reflect_on_tool_use=True,
     max_tool_iterations=5,

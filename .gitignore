@@ -1,8 +1,19 @@
-.venv/
-data/
-NatureCommunications/
+# Environment files
 .env
 
+# Virtual environments
+.venv/
+
+# Data and results
+data/
+results/
+*.log
+*.png
+
+# Python cache files
 **/__pycache__/
 
+# Other files
 ___*.py
+NatureCommunications/
+.ruff_cache/

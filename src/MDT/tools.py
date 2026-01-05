@@ -40,7 +40,7 @@ async def google_search(query: str, top_k: Optional[int] = 5) -> str:
     try:
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
-    except Exception as e:
+    except Exception:
         # logger.error(f"Google Search API error: {e}")
         return []
 

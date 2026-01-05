@@ -1,11 +1,11 @@
-import argparse
 import asyncio
+from src.emotional_patient import EmotionalPatient
 from src.conversation import Conversation
 
-async def main(patient_id, diagnosis_id, has_expert_knowledge: bool, human_in_the_loop: bool):
-    conversation = Conversation(
-        patient_id=f"00{patient_id}",
-        patient_data="""
+
+async def main():
+    emotional_patient = EmotionalPatient(
+        user_profile="""
         {
             "personal_info": {
                 "name": "张先生",
@@ -26,8 +26,13 @@ async def main(patient_id, diagnosis_id, has_expert_knowledge: bool, human_in_th
                 "symptom_duration": "1年"
             }
         }
-        """.strip(),
-        diagnosis_id=f"00{diagnosis_id}",
+        """.strip()
+    )
+
+    conversation = Conversation(
+        patient_id="007",
+        patient_data=emotional_patient,
+        diagnosis_id="007",
         diagnosis_data={
             "symptom": {
                 "chief_complaint": "长期咳嗽约一年，经常伴有少量血痰",
@@ -51,24 +56,12 @@ async def main(patient_id, diagnosis_id, has_expert_knowledge: bool, human_in_th
         reply_model_name="gpt-4o",
         tom_model_name="gpt-4o",
         max_turns=20,
-        has_expert_knowledge=has_expert_knowledge,
-        human_in_the_loop=human_in_the_loop,
+        human_in_the_loop=True,
+        has_expert_knowledge=False,
     )
-
     result = await conversation.run_conversation()
-    conversation.save_conversation("results/final_conversation")
-    print("Final Conversation Result:", result)
+    conversation.save_conversation("final_conversation_human")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Run conversation with patient.")
-    parser.add_argument('--id', type=int, default=7, help="Patient and diagnosis ID number.")
-    parser.add_argument('--expert_knowledge', action='store_true', help="Enable expert knowledge in strategy model.")
-    parser.add_argument('--human_in_the_loop', action='store_true', help="Enable human in the loop for replies.")
-    args = parser.parse_args()
-    asyncio.run(main(
-        patient_id=args.id,
-        diagnosis_id=args.id,
-        has_expert_knowledge=args.expert_knowledge,
-        human_in_the_loop=args.human_in_the_loop
-    ))
+    asyncio.run(main())

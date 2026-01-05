@@ -1,0 +1,4 @@
+STAGE_PI = 0
+STAGE_K = 1
+STAGE_E = 2
+STAGE_S = 3
