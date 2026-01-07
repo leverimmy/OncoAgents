@@ -1,1 +1,5 @@
-from .conversation import *
+from .conversation import Conversation
+
+__all__ = [
+    "Conversation",
+]

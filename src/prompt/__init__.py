@@ -1,13 +1,32 @@
 # Prompts for conversation framework
-from .conversation_prompt_copy import *
+from .conversation_prompt_copy import DOCTOR_REPLY_PROMPT, DOCTOR_STRATEGY_PROMPT, STAGE_TO_EXPERT_KNOWLEDGE, DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE
 
 # Prompts for Emotional Patient agent
-from .emotional_patient_prompt_rational import *
-from .emotional_patient_prompt_emotional import *
-from .emotional_patient_prompt_reply import *
+from .emotional_patient_prompt_rational import RATIONAL_PROMPTS
+from .emotional_patient_prompt_emotional import EMOTIONAL_PROMPTS
+from .emotional_patient_prompt_reply import REPLY_PROMPTS
 
 # Prompts for Not Emotional Patient agent
-from .not_emotional_patient_prompt import *
+from .not_emotional_patient_prompt import NOT_EMOTIONAL_REPLY_PROMPT
 
 # Prompts for MDT agents
-from .mdt_prompt import *
+from .mdt_prompt import RADIOLOGIST_SYSTEM_MESSAGE, PATHOLOGIST_SYSTEM_MESSAGE, SURGEON_SYSTEM_MESSAGE, MEDICAL_ONCOLOGIST_SYSTEM_MESSAGE, RADIATION_ONCOLOGIST_SYSTEM_MESSAGE
+
+__all__ = [
+    "DOCTOR_REPLY_PROMPT",
+    "DOCTOR_STRATEGY_PROMPT",
+    "STAGE_TO_EXPERT_KNOWLEDGE",
+    "DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE",
+
+    "RATIONAL_PROMPTS", 
+    "EMOTIONAL_PROMPTS",
+    "REPLY_PROMPTS",
+
+    "NOT_EMOTIONAL_REPLY_PROMPT",
+
+    "RADIOLOGIST_SYSTEM_MESSAGE",
+    "PATHOLOGIST_SYSTEM_MESSAGE",
+    "SURGEON_SYSTEM_MESSAGE",
+    "MEDICAL_ONCOLOGIST_SYSTEM_MESSAGE",
+    "RADIATION_ONCOLOGIST_SYSTEM_MESSAGE",
+]
