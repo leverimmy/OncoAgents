@@ -3,6 +3,7 @@ from .conversation_prompt_copy import (
     DOCTOR_REPLY_PROMPT,
     DOCTOR_STRATEGY_PROMPT,
     DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE,
+    DOCTOR_TOM_PROMPT,
     STAGE_TO_EXPERT_KNOWLEDGE,
 )
 from .emotional_patient_prompt_emotional import EMOTIONAL_PROMPTS
@@ -25,6 +26,7 @@ from .not_emotional_patient_prompt import NOT_EMOTIONAL_REPLY_PROMPT
 
 __all__ = [
     "DOCTOR_REPLY_PROMPT",
+    "DOCTOR_TOM_PROMPT",
     "DOCTOR_STRATEGY_PROMPT",
     "STAGE_TO_EXPERT_KNOWLEDGE",
     "DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE",

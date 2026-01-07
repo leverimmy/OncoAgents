@@ -1,32 +1,45 @@
 import json
 import os
+
 from autogen_agentchat.messages import UserMessage
-from src.backend import strategy_model_client, expert_model_client, reply_model_client
+
+from src.backend import get_client
+from src.emotional_patient import EmotionalPatient, NotEmotionalPatient
 from src.json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
-from src.emotional_patient import EmotionalPatient
-from src.prompt import PATIENT_REPLY_PROMPT, PROMPT_GENERATE_STRATEGY_SINGLE_EXPERT, STAGE_TO_EXPERT_KNOWLEDGE, PROMPT_GENERATE_STAGE, PROMPT_GENERATE_STRATEGY
+from src.prompt import (
+    DOCTOR_REPLY_PROMPT,
+    DOCTOR_STRATEGY_PROMPT,
+    DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE,
+    DOCTOR_TOM_PROMPT,
+    STAGE_TO_EXPERT_KNOWLEDGE,
+)
 from src.utils import logger
-from typing import Dict, Tuple
 
 
 class Conversation:
     def __init__(self, patient_id: str, patient_data: str,
-                 diagnosis_id: str, diagnosis_data: Dict[str, str],
+                 diagnosis_id: str, diagnosis_data: dict[str, str],
                  patient_model_name: str, strategy_model_name: str, reply_model_name: str, tom_model_name: str,
-                 max_turns: int = 20, human_in_the_loop: bool = False, has_expert_knowledge: bool = False) -> None:
+                 max_turns: int = 20, human_in_the_loop: bool = False, has_expert_knowledge: bool = False,
+                 is_emotional_patient: bool = True) -> None:
         self.patient_id = patient_id
         self.patient_data = patient_data
         self.diagnosis_id = diagnosis_id
         self.diagnosis_data = diagnosis_data
         
         self.patient_model_name = patient_model_name
-        self.patient_agent = EmotionalPatient(user_profile=patient_data)
+        self.is_emotional_patient = is_emotional_patient
+        if is_emotional_patient:
+            self.patient_agent = EmotionalPatient(user_profile=patient_data, model_name=patient_model_name)
+        else:
+            self.patient_agent = NotEmotionalPatient(user_profile=patient_data, model_name=patient_model_name)
         self.strategy_model_name = strategy_model_name
-        self.strategy_model = strategy_model_client
+        self.strategy_model = get_client(strategy_model_name)
         self.reply_model_name = reply_model_name
-        self.reply_model = reply_model_client
+        self.reply_model = get_client(reply_model_name)
         self.tom_model_name = tom_model_name
-        self.tom_model = expert_model_client
+        self.tom_model = get_client(tom_model_name)
+        
         self.human_in_the_loop = human_in_the_loop
         self.has_expert_knowledge = has_expert_knowledge
 
@@ -38,15 +51,15 @@ class Conversation:
         self.judge_scores = []
         self.patient_scores = []
 
-        self.patient_strategy_prompt = PROMPT_GENERATE_STRATEGY
-        self.patient_reply_prompt = PATIENT_REPLY_PROMPT
-        self.patient_strategy_prompt_with_expert_knowledge = PROMPT_GENERATE_STRATEGY_SINGLE_EXPERT
-
+        self.doctor_strategy_prompt = DOCTOR_STRATEGY_PROMPT
+        self.doctor_reply_prompt = DOCTOR_REPLY_PROMPT
+        self.doctor_strategy_prompt_with_expert_knowledge = DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE
+        self.doctor_tom_prompt = DOCTOR_TOM_PROMPT
 
     def _get_dialogue_history(self) -> str:
         dialogue_history = []
         for turn in self.conversation_history:
-            if turn["speaker"] == "Seller":
+            if turn["speaker"] == "Doctor":
                 dialogue_history.append({"speaker": "Doctor", "message": turn["message"]["response"]})
             else:
                 dialogue_history.append({"speaker": "Patient", "message": turn["message"]["response"]})
@@ -74,8 +87,8 @@ class Conversation:
         logger.info(f"Patient Return: {patient_ret}")
         return patient_ret
 
-    async def _run_tom_reasoning(self) -> Dict[str, str]:
-        stage_prompt = PROMPT_GENERATE_STAGE.format(
+    async def _run_tom_reasoning(self) -> dict[str, str]:
+        stage_prompt = self.doctor_tom_prompt.format(
             dialogue_history = self._get_dialogue_history_with_stage()
         )
         tom_reasoning = await self.tom_model.create(
@@ -86,10 +99,10 @@ class Conversation:
             json_output=TOM_REASONING_JSON_SCHEMA,
         )
         json_result = json.loads(tom_reasoning.content)
-        logger.info(f"Rational CoT Result: {json_result}")
+        logger.info(f"ToM Reasoning Result: {json_result}")
         return json_result
 
-    async def _run_strategy_model(self, stage: str, analysis: str) -> Tuple[str, str]:
+    async def _run_strategy_model(self, stage: str, analysis: str) -> tuple[str, str]:
         """
         Run the strategy model to determine the strategy based on the current stage and analysis.
         
@@ -100,14 +113,14 @@ class Conversation:
             Tuple[str, str]: The generated analysis and strategy.
         """
         if self.has_expert_knowledge:
-            prompt = self.patient_strategy_prompt_with_expert_knowledge.format(
+            prompt = self.doctor_strategy_prompt_with_expert_knowledge.format(
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
                 expert_knowledge=STAGE_TO_EXPERT_KNOWLEDGE[stage],
                 patient_analysis=analysis,
             )
         else:
-            prompt = self.patient_strategy_prompt.format(
+            prompt = self.doctor_strategy_prompt.format(
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
             )
@@ -125,7 +138,7 @@ class Conversation:
         logger.info(f"Strategy Model Result: {json_result}")
         return analysis, strategy
 
-    async def _run_reply_model(self, analysis: str, strategy: str) -> Dict[str, str]:
+    async def _run_reply_model(self, analysis: str, strategy: str) -> dict[str, str]:
         """
         Run the reply model to generate a reply based on analysis and strategy.
         
@@ -136,7 +149,7 @@ class Conversation:
             str: The generated reply.
         """
 
-        prompt = self.patient_reply_prompt.format(
+        prompt = self.doctor_reply_prompt.format(
             diagnosis_data=self.diagnosis_data,
             dialogue_history=self._get_dialogue_history(),
             analysis=analysis,
@@ -178,7 +191,7 @@ class Conversation:
                             analysis=patient_analysis,
                         )
                     else:
-                        tom_reasoning = {"patient_analysis": "null", "stage": ""}
+                        tom_reasoning = {"patient_analysis": "human_input", "stage": "human_input"}
                         analysis, strategy = await self._run_strategy_model(
                             stage="",
                             analysis="",
@@ -190,11 +203,10 @@ class Conversation:
                         "strategy": strategy,
                         "response": doctor_reply
                     }
-                    # logger.info(f"Doctor Reply: {doctor_ret}")
                     self.conversation_history.append({
                         "speaker": "Doctor",
                         "tom_reasoning": tom_reasoning,
-                        "message": doctor_ret
+                        "message": doctor_ret,
                     })
                 else:
                     doctor_reply = input("Input Doctor Reply: ")
@@ -206,22 +218,20 @@ class Conversation:
                     self.conversation_history.append({
                         "speaker": "Doctor",
                         "tom_reasoning": {"patient_analysis": "human_input", "stage": "human_input"},
-                        "message": doctor_ret
+                        "message": doctor_ret,
                     })
 
                 patient_ret = await self._run_dialogue()
 
-                self.conversation_history[-1]["stage"] = "human_input"
                 self.conversation_history.append({
                     "speaker": "Patient",
                     "message": patient_ret
                 })
 
                 self.patient_scores.append({
-                    "ccs_score": patient_ret.get("ccs_score", self.patient_scores[-1]["ccs_score"] if self.patient_scores else 0),
-                    "tas_score": patient_ret.get("tas_score", self.patient_scores[-1]["tas_score"] if self.patient_scores else 0),
-                    "trs_score": patient_ret.get("trs_score", self.patient_scores[-1]["trs_score"] if self.patient_scores else 0),
-                    "ers_score": patient_ret.get("ers_score", self.patient_scores[-1]["ers_score"] if self.patient_scores else 0),
+                    "ccs_score": patient_ret.get("ccs_score", 0),
+                    "ess_score": patient_ret.get("ess_score", 0),
+                    "pas_score": patient_ret.get("pas_score", 0),
                 })
                 turn_success = True
             except Exception as e:
@@ -242,7 +252,7 @@ class Conversation:
                 self.negotiation_completed = True
                 self.negotiation_result = "accept"
                 break
-            if patient_ret.get("tas_score", 0) >= 100:
+            if patient_ret["pas_score"] >= 100:
                 self.negotiation_completed = True
                 self.negotiation_result = "accept"
                 break
@@ -255,9 +265,7 @@ class Conversation:
         logger.info("Negotiation process completed.")
         logger.info(f"Turns completed: {self.completed_turns}")
         logger.info(f"Negotiation result: {self.negotiation_result}")
-        
-        # logger.info("Conversation judge scores: ", self.judge_scores)
-        
+                
         return {
             # "judge_scores": self.judge_scores,
             "patient_scores": self.patient_scores,
@@ -266,24 +274,14 @@ class Conversation:
         }
 
     def save_conversation(self, output_dir: str):
-        """
-        Save the conversation to the specified output directory.
-        
-        Args:
-            output_dir (str): The directory where the conversation will be saved.
-        
-        Returns:
-            None
-        """
-
         os.makedirs(output_dir, exist_ok=True)
-        output_file = os.path.join(output_dir, f"dia{self.diagnosis_id}_patient_{self.patient_id}.json")
+        output_file = os.path.join(output_dir, f"dia{self.diagnosis_id}_patient{self.patient_id}.json")
 
         output_data = {
             "diagnosis_id": self.diagnosis_id,
             "diagnosis_data": self.diagnosis_data,
             "patient_id": self.patient_id,
-            "patient_data": json.loads(self.patient_data),
+            "patient_data": self.patient_data,
             "conversation_history": self.conversation_history,
             "completed_turns": self.completed_turns,  # Include the actual number of turns
             "negotiation_completed": self.negotiation_completed,  # Whether negotiation reached conclusion
@@ -292,10 +290,14 @@ class Conversation:
                 "patient": self.patient_model_name,
                 "strategy": self.strategy_model_name,
                 "reply": self.reply_model_name,
+                "tom": self.tom_model_name
             },
             "parameters": {
-                "max_turns": self.max_turns
-            }
+                "max_turns": self.max_turns,
+                "has_expert_knowledge": self.has_expert_knowledge,
+                "human_in_the_loop": self.human_in_the_loop,
+                "is_emotional_patient": self.is_emotional_patient,
+            },
         }
 
         with open(output_file, "w", encoding="utf-8") as f:
