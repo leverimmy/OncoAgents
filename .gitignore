@@ -4,6 +4,9 @@
 # Virtual environments
 .venv/
 
+# Logs
+logs/
+
 # Data and results
 data/
 results/
