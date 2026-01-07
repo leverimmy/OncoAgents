@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def get_client(name: str) -> OpenAIChatCompletionClient:
     if name in ["gpt-4o", "o3", "gpt-5-mini"]:
         return OpenAIChatCompletionClient(
@@ -21,7 +22,7 @@ def get_client(name: str) -> OpenAIChatCompletionClient:
                 "function_calling": True,
                 "json_output": True,
                 "family": "siliconflow",
-                "structured_output": True
+                "structured_output": True,
             },
             api_key=os.getenv("SILICON_FLOW_API_KEY"),
             base_url=os.getenv("SILICON_FLOW_API_BASE_URL"),

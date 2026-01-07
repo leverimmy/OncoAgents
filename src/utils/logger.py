@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class MyLogger:
     def __init__(
         self,
@@ -72,6 +73,7 @@ class MyLogger:
     # Delegate any other attributes to underlying logger
     def __getattr__(self, name):
         return getattr(self._logger, name)
+
 
 logger = MyLogger(
     name="OncoAgents",

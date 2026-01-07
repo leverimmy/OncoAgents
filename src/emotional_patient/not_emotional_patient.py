@@ -6,6 +6,7 @@ from src.prompt import NOT_EMOTIONAL_REPLY_PROMPT
 from src.utils import logger, SafeDict
 from typing import Dict
 
+
 class NotEmotionalPatient:
     def __init__(self, user_profile: str, model_name: str) -> None:
         self.user_profile = user_profile
@@ -13,18 +14,20 @@ class NotEmotionalPatient:
         self.state = {
             "tas_score": 0,
         }
-    
+
     async def run_reply(self, dialogue_history: Dict[str, str]) -> Dict[str, str]:
         format_args = SafeDict(
-            user_profile = self.user_profile,
-            dialogue_history = dialogue_history,
+            user_profile=self.user_profile,
+            dialogue_history=dialogue_history,
         )
 
         reply = await self.client.create(
-            messages=[UserMessage(
-                content=NOT_EMOTIONAL_REPLY_PROMPT.format_map(format_args),
-                source="User"
-            )],
+            messages=[
+                UserMessage(
+                    content=NOT_EMOTIONAL_REPLY_PROMPT.format_map(format_args),
+                    source="User",
+                )
+            ],
             json_output=NOT_EMOTIONAL_REPLY_JSON_SCHEMA,
         )
         logger.info(f"Reply Result: {reply.content}")
@@ -38,4 +41,3 @@ class NotEmotionalPatient:
         except Exception as e:
             logger.error(f"Error in NotEmotionalPatient respond: {e}")
             return None
-    
