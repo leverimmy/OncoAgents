@@ -1,4 +1,0 @@
-target-version = "py313"
-exclude = ["src/MDT"]
-
-[lint]

@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class RATIONAL_JSON_SCHEMA_STAGE0(BaseModel):
@@ -38,7 +39,7 @@ class RATIONAL_JSON_SCHEMA_STAGE3(BaseModel):
     ccs_score: int = Field(
         ge=0,
         le=100,
-        description=" 患者对病情严重性、治疗逻辑、以及“不治疗的后果”的真实理解程度评分，0-100分",
+        description="患者对病情严重性、治疗逻辑、以及“不治疗的后果”的真实理解程度评分，0-100分",
     )
 
 

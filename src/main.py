@@ -1,7 +1,8 @@
 import argparse
 import asyncio
-import os
 import json
+import os
+
 from src.conversation import Conversation
 
 
@@ -18,7 +19,7 @@ async def main(
     is_emotional_patient: bool,
     output_dir: str,
 ):
-    with open(os.path.join(data_dir, f"{data_id}.json"), "r", encoding="utf-8") as f:
+    with open(os.path.join(data_dir, f"{data_id}.json"), encoding="utf-8") as f:
         case = json.load(f)
         patient_data = {
             "personal_info": case["personal_info"],

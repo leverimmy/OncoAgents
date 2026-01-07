@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class NOT_EMOTIONAL_REPLY_JSON_SCHEMA(BaseModel):

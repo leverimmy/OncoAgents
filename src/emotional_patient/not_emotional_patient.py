@@ -1,10 +1,11 @@
 import json
+
 from autogen_agentchat.messages import UserMessage
+
 from src.backend import get_client
 from src.json_schema import NOT_EMOTIONAL_REPLY_JSON_SCHEMA
 from src.prompt import NOT_EMOTIONAL_REPLY_PROMPT
-from src.utils import logger, SafeDict
-from typing import Dict
+from src.utils import SafeDict, logger
 
 
 class NotEmotionalPatient:
@@ -15,7 +16,7 @@ class NotEmotionalPatient:
             "tas_score": 0,
         }
 
-    async def run_reply(self, dialogue_history: Dict[str, str]) -> Dict[str, str]:
+    async def run_reply(self, dialogue_history: dict[str, str]) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
@@ -33,7 +34,7 @@ class NotEmotionalPatient:
         logger.info(f"Reply Result: {reply.content}")
         return json.loads(reply.content)
 
-    async def respond(self, dialogue_history: Dict[str, str]) -> Dict[str, str] | None:
+    async def respond(self, dialogue_history: dict[str, str]) -> dict[str, str] | None:
         try:
             reply = await self.run_reply(dialogue_history)
             self.state.update(reply)

@@ -1,15 +1,16 @@
 import asyncio
 import json
+
 from autogen_agentchat.messages import UserMessage
+
 from src.backend import get_client
 from src.json_schema import (
-    RATIONAL_JSON_SCHEMAS,
     EMOTIONAL_JSON_SCHEMA,
+    RATIONAL_JSON_SCHEMAS,
     REPLY_JSON_SCHEMA,
 )
-from src.prompt import RATIONAL_PROMPTS, EMOTIONAL_PROMPTS, REPLY_PROMPTS
-from typing import Dict
-from src.utils import logger, SafeDict, STAGE_PI, NAME2STAGE
+from src.prompt import EMOTIONAL_PROMPTS, RATIONAL_PROMPTS, REPLY_PROMPTS
+from src.utils import NAME2STAGE, STAGE_PI, SafeDict, logger
 
 
 class EmotionalPatient:
@@ -28,15 +29,15 @@ class EmotionalPatient:
             "pas_score": 0,
         }
 
-    def update_state(self, current_state: Dict[str, str]) -> None:
+    def update_state(self, current_state: dict[str, str]) -> None:
         for key in self.state.keys():
             if key in current_state:
                 self.state[key] = current_state[key]
 
     # TODO: dialogue_history 的类型感觉不一致
     async def run_rational_cot(
-        self, dialogue_history: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, dialogue_history: dict[str, str]
+    ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
@@ -62,8 +63,8 @@ class EmotionalPatient:
         return json_result
 
     async def run_emotional_cot(
-        self, dialogue_history: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, dialogue_history: dict[str, str]
+    ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
@@ -88,8 +89,8 @@ class EmotionalPatient:
         return json_result
 
     async def run_reply(
-        self, dialogue_history: Dict[str, str], current_state: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, dialogue_history: dict[str, str], current_state: dict[str, str]
+    ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
@@ -115,8 +116,8 @@ class EmotionalPatient:
         return json.loads(reply.content)
 
     async def respond(
-        self, dialogue_history: Dict[str, str]
-    ) -> Dict[str, int | str] | None:
+        self, dialogue_history: dict[str, str]
+    ) -> dict[str, int | str] | None:
         # 并行运行 rational_cot 和 emotional_cot
         rational_cot, emotional_cot = await asyncio.gather(
             self.run_rational_cot(dialogue_history),
