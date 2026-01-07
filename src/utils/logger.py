@@ -1,30 +1,42 @@
 import logging
+import os
 import sys
-from pathlib import Path
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class MyLogger:
-    """
-    Simple wrapper around logging.Logger.
-    Usage: from logger import logger
-         logger.info("message")
-    """
-
-    def __init__(self, name: str = "OncoAgents", level: int = logging.INFO, logfile: str | None = None):
+    def __init__(
+        self,
+        name: str = "OncoAgents",
+        level: int = logging.INFO,
+        log_dir: str | None = None,
+    ):
         self._logger = logging.getLogger(name)
 
         # Avoid adding duplicate handlers on repeated imports
         if not self._logger.handlers:
             self._logger.setLevel(level)
-            fmt = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+
+            fmt = logging.Formatter(
+                "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+                "%Y-%m-%d %H:%M:%S",
+            )
 
             ch = logging.StreamHandler(sys.stdout)
             ch.setLevel(level)
             ch.setFormatter(fmt)
             self._logger.addHandler(ch)
 
-            if logfile:
-                Path(logfile).parent.mkdir(parents=True, exist_ok=True)
-                fh = logging.FileHandler(logfile)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+
+                timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+                log_filename = f"{name}_{timestamp}.log"
+                log_path = os.path.join(log_dir, log_filename)
+
+                fh = logging.FileHandler(log_path, encoding="utf-8")
                 fh.setLevel(level)
                 fh.setFormatter(fmt)
                 self._logger.addHandler(fh)
@@ -61,4 +73,7 @@ class MyLogger:
     def __getattr__(self, name):
         return getattr(self._logger, name)
 
-logger = MyLogger()
+logger = MyLogger(
+    name="OncoAgents",
+    log_dir=os.getenv("LOGGING_FILE_DIR", "logs"),
+)

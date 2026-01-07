@@ -1,74 +1,78 @@
 import argparse
 import asyncio
+import os
+import json
 from src.conversation import Conversation
 
-async def main(patient_id, diagnosis_id, has_expert_knowledge: bool, human_in_the_loop: bool):
-    conversation = Conversation(
-        patient_id=f"00{patient_id}",
-        patient_data="""
-        {
-            "personal_info": {
-                "name": "张先生",
-                "age": 55,
-                "gender": "男",
-                "occupation": "退休工人",
-                "personality": "遇到挫折时会感到担忧，在交流中喜欢提出很多问题，文化程度不高",
-                "lifestyle_habits": {
-                    "smoking_status": "长期吸烟（每天20支烟、30年以上）",
-                    "alcohol_use": "偶尔饮酒",
-                    "physical_activity": "较少运动，喜欢看电视休闲",
-                    "diet": "饮食以油腻、肉类为主，蔬菜摄入相对较少"
-                }
-            },
-            "symptom": {
-                "chief_complaint": "长期咳嗽约一年，经常伴有少量血痰",
-                "additional_symptoms": ["胸闷", "疲乏无力"],
-                "symptom_duration": "1年"
-            }
+async def main(data_dir: str, data_id: int,
+               patient_model_name: str, strategy_model_name: str,
+               reply_model_name: str, tom_model_name: str,
+               max_turns: int,
+               has_expert_knowledge: bool, human_in_the_loop: bool,
+               is_emotional_patient: bool,
+               output_dir: str):
+    
+    with open(os.path.join(data_dir, f"{data_id}.json"), 'r', encoding='utf-8') as f:
+        case = json.load(f)
+        patient_data = {
+            "personal_info": case["personal_info"],
+            "symptom": case["symptom"],
         }
-        """.strip(),
-        diagnosis_id=f"00{diagnosis_id}",
-        diagnosis_data={
-            "symptom": {
-                "chief_complaint": "长期咳嗽约一年，经常伴有少量血痰",
-                "additional_symptoms": ["胸闷", "疲乏无力"],
-                "symptom_duration": "1年"
-            },
-            "diagnosis": "非小细胞肺癌，临床分期 T2N1M0",
-            "treatment": {
-                "initial_plan": [
-                    "外科手术切除左肺病灶",
-                    "术后辅助化疗"
-                ],
-                "follow_up_plan": [
-                    "每3个月复查胸部CT和肿瘤标志物",
-                    "如有复发可能考虑靶向治疗或免疫治疗"
-                ]
-            }
-        },
-        patient_model_name="gpt-4o",
-        strategy_model_name="gpt-4o",
-        reply_model_name="gpt-4o",
-        tom_model_name="gpt-4o",
-        max_turns=20,
+        diagnosis_data = {
+            "symptom": case["symptom"],
+            "diagnosis": case["diagnosis"],
+            "treatment": case["treatment"],
+        }
+    
+    conversation = Conversation(
+        patient_id=f"{data_id}",
+        patient_data=patient_data,
+        diagnosis_id=f"{data_id}",
+        diagnosis_data=diagnosis_data,
+        patient_model_name=patient_model_name,
+        strategy_model_name=strategy_model_name,
+        reply_model_name=reply_model_name,
+        tom_model_name=tom_model_name,
+        max_turns=max_turns,
         has_expert_knowledge=has_expert_knowledge,
         human_in_the_loop=human_in_the_loop,
+        is_emotional_patient=is_emotional_patient,
     )
 
     result = await conversation.run_conversation()
-    conversation.save_conversation("results/final_conversation")
+    conversation.save_conversation(os.path.join(output_dir, f"final_conversation{'_human' if human_in_the_loop else ''}"))
     print("Final Conversation Result:", result)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run conversation with patient.")
+    parser.add_argument('--data_dir', type=str, default="data/patient_cases", help="Directory for patient and diagnosis data.")
     parser.add_argument('--id', type=int, default=7, help="Patient and diagnosis ID number.")
+
+    parser.add_argument('--patient_model', type=str, default="gpt-4o", help="Patient model name.")
+    parser.add_argument('--strategy_model', type=str, default="gpt-4o", help="Strategy model name.")
+    parser.add_argument('--reply_model', type=str, default="gpt-4o", help="Reply model name.")
+    parser.add_argument('--tom_model', type=str, default="gpt-4o", help="Theory of Mind model name.")
+
+    parser.add_argument('--max_turns', type=int, default=20, help="Maximum number of conversation turns.")
+
     parser.add_argument('--expert_knowledge', action='store_true', help="Enable expert knowledge in strategy model.")
     parser.add_argument('--human_in_the_loop', action='store_true', help="Enable human in the loop for replies.")
+    parser.add_argument('--is_emotional_patient', action='store_true', help="Set patient as emotional or not.")
+
+    parser.add_argument('--output_dir', type=str, default="results", help="Directory to save conversation results.")
+
     args = parser.parse_args()
     asyncio.run(main(
-        patient_id=args.id,
-        diagnosis_id=args.id,
+        data_dir=args.data_dir,
+        data_id=args.id,
+        patient_model_name=args.patient_model,
+        strategy_model_name=args.strategy_model,
+        reply_model_name=args.reply_model,
+        tom_model_name=args.tom_model,
+        max_turns=args.max_turns,
         has_expert_knowledge=args.expert_knowledge,
-        human_in_the_loop=args.human_in_the_loop
+        human_in_the_loop=args.human_in_the_loop,
+        is_emotional_patient=args.is_emotional_patient,
+        output_dir=args.output_dir,
     ))
