@@ -9,8 +9,8 @@ from src.json_schema import (
     RATIONAL_JSON_SCHEMAS,
     REPLY_JSON_SCHEMA,
 )
-from src.prompt import EMOTIONAL_PROMPTS, RATIONAL_PROMPTS, REPLY_PROMPTS
-from src.utils import NAME2STAGE, STAGE_PI, SafeDict, logger
+from src.prompt import EMOTIONAL_PROMPTS, PROFILE_PROMPT, RATIONAL_PROMPTS, REPLY_PROMPTS
+from src.utils import NAME2STAGE, STAGE_E, STAGE_PI, SafeDict, logger
 
 
 class EmotionalPatient:
@@ -98,6 +98,7 @@ class EmotionalPatient:
             knowledge=current_state.get("knowledge", ""),
             information_gap=current_state.get("information_gap", ""),
             ccs_score=current_state.get("ccs_score", ""),
+            emotion_analysis=current_state.get("emotion_analysis", ""),
             emotion_state=current_state.get("emotion_state", ""),
             ess_score=current_state.get("ess_score", ""),
             pas_score=self.state["pas_score"],
@@ -119,6 +120,10 @@ class EmotionalPatient:
         self, dialogue_history: dict[str, str]
     ) -> dict[str, int | str] | None:
         # 并行运行 rational_cot 和 emotional_cot
+
+        # emotional_cot = await self.run_emotional_cot(dialogue_history)
+        # current_state = emotional_cot
+
         rational_cot, emotional_cot = await asyncio.gather(
             self.run_rational_cot(dialogue_history),
             self.run_emotional_cot(dialogue_history),
@@ -129,12 +134,21 @@ class EmotionalPatient:
         try:
             reply = await self.run_reply(dialogue_history, current_state)
 
-            if NAME2STAGE[reply["stage_transfer"]] != self.emotion_stage:
+            next_stage = NAME2STAGE[reply["stage_transfer"]] if current_state.get("ess_score", 0) < 70 else STAGE_E
+
+            if next_stage != self.emotion_stage:
                 logger.info("Stage transfer occurred!")
-                self.emotion_stage = NAME2STAGE[reply["stage_transfer"]]
+                self.emotion_stage = next_stage
+                # rational_cot, emotional_cot = await asyncio.gather(
+                #         self.run_rational_cot(dialogue_history),
+                #         self.run_emotional_cot(dialogue_history),
+                # )
+                # current_state = {**rational_cot, **emotional_cot}
+                reply = await self.run_reply(dialogue_history, current_state)
 
             current_state.update(reply)
             self.update_state(current_state)
+            logger.info(f"Current Patient State: {current_state}")
             return current_state
         except Exception as e:
             logger.error(f"Error in EmotionalPatient respond: {e}")

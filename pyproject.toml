@@ -8,6 +8,7 @@ dependencies = [
     "autogen-agentchat>=0.7.5",
     "autogen-ext[openai]>=0.7.5",
     "dotenv>=0.9.9",
+    "matplotlib>=3.10.8",
 ]
 
 [dependency-groups]
@@ -17,7 +18,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py313"
-exclude = ["src/MDT", "src/prompt", "src/json_schema"]
+exclude = ["src/MDT", "src/prompt"]
 
 [tool.ruff.lint]
 select = [

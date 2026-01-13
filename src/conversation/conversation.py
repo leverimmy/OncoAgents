@@ -6,27 +6,31 @@ from autogen_agentchat.messages import UserMessage
 from src.backend import get_client
 from src.emotional_patient import EmotionalPatient, NotEmotionalPatient
 from src.json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
+from src.mdt import MDT
 from src.prompt import (
     DOCTOR_REPLY_PROMPT,
+    DOCTOR_REPLY_PROMPT_WITH_EXPLANATION,
     DOCTOR_STRATEGY_PROMPT,
     DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE,
     DOCTOR_TOM_PROMPT,
     STAGE_TO_EXPERT_KNOWLEDGE,
 )
-from src.utils import logger
+from src.utils import STAGE2NAME, logger
 
 
 class Conversation:
     def __init__(
         self,
         patient_id: str,
-        patient_data: str,
+        patient_data: dict[str, str],
         diagnosis_id: str,
         diagnosis_data: dict[str, str],
+        examination_data: dict[str, str],
         patient_model_name: str,
         strategy_model_name: str,
         reply_model_name: str,
         tom_model_name: str,
+        mdt_model_name: str,
         max_turns: int = 20,
         human_in_the_loop: bool = False,
         has_expert_knowledge: bool = False,
@@ -36,7 +40,7 @@ class Conversation:
         self.patient_data = patient_data
         self.diagnosis_id = diagnosis_id
         self.diagnosis_data = diagnosis_data
-
+        self.examination_data = examination_data
         self.patient_model_name = patient_model_name
         self.is_emotional_patient = is_emotional_patient
         if is_emotional_patient:
@@ -53,6 +57,8 @@ class Conversation:
         self.reply_model = get_client(reply_model_name)
         self.tom_model_name = tom_model_name
         self.tom_model = get_client(tom_model_name)
+        self.mdt_model_name = mdt_model_name
+        self.mdt = MDT(mdt_model_name, self.examination_data)
 
         self.human_in_the_loop = human_in_the_loop
         self.has_expert_knowledge = has_expert_knowledge
@@ -66,23 +72,23 @@ class Conversation:
         self.patient_scores = []
 
         self.doctor_strategy_prompt = DOCTOR_STRATEGY_PROMPT
-        self.doctor_reply_prompt = DOCTOR_REPLY_PROMPT
         self.doctor_strategy_prompt_with_expert_knowledge = (
             DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE
         )
+        self.doctor_reply_prompt = DOCTOR_REPLY_PROMPT
+        self.doctor_reply_prompt_with_explanation = DOCTOR_REPLY_PROMPT_WITH_EXPLANATION
         self.doctor_tom_prompt = DOCTOR_TOM_PROMPT
 
     def _get_dialogue_history(self) -> str:
         dialogue_history = []
         for turn in self.conversation_history:
-            if turn["speaker"] == "Doctor":
+            try:
+                assert turn["speaker"] in ["Doctor", "Patient"]
                 dialogue_history.append(
-                    {"speaker": "Doctor", "message": turn["message"]["response"]}
+                    {"speaker": turn["speaker"], "message": turn["message"]["response"]}
                 )
-            else:
-                dialogue_history.append(
-                    {"speaker": "Patient", "message": turn["message"]["response"]}
-                )
+            except Exception as e:
+                logger.error(f'Error processing turn: {turn}, turn["speaker"]: {e}')
         return json.dumps(dialogue_history, ensure_ascii=False)
 
     def _get_dialogue_history_with_stage(self) -> str:
@@ -93,29 +99,14 @@ class Conversation:
                     {
                         "speaker": "Doctor",
                         "message": turn["message"]["response"],
-                        "stage": turn["stage"],
+                        "stage": turn["tom_reasoning"]["stage"],
                     }
                 )
             else:
                 dialogue_history.append(
                     {"speaker": "Patient", "message": turn["message"]["response"]}
                 )
-        return json.dumps(dialogue_history, ensure_ascii=False)
-
-    async def _run_dialogue(self) -> str:
-        """
-        Run the dialogue model to generate the next utterance.
-
-        Args:
-        Returns:
-            str: The generated patient *structured return*.
-        """
-
-        patient_ret = await self.patient_agent.respond(
-            dialogue_history=self._get_dialogue_history()
-        )
-        logger.info(f"Patient Return: {patient_ret}")
-        return patient_ret
+        return json.dumps(dialogue_history, ensure_ascii=False)        
 
     async def _run_tom_reasoning(self) -> dict[str, str]:
         stage_prompt = self.doctor_tom_prompt.format(
@@ -129,16 +120,9 @@ class Conversation:
         logger.info(f"ToM Reasoning Result: {json_result}")
         return json_result
 
-    async def _run_strategy_model(self, stage: str, analysis: str) -> tuple[str, str]:
-        """
-        Run the strategy model to determine the strategy based on the current stage and analysis.
-
-        Args:
-            stage (str): The current stage of the conversation.
-            analysis (str): The analysis from previous steps.
-        Returns:
-            Tuple[str, str]: The generated analysis and strategy.
-        """
+    async def _run_strategy_model(
+        self, stage: str, analysis: str
+    ) -> tuple[str, str, bool]:
         if self.has_expert_knowledge:
             prompt = self.doctor_strategy_prompt_with_expert_knowledge.format(
                 diagnosis_data=self.diagnosis_data,
@@ -159,26 +143,48 @@ class Conversation:
         json_result = json.loads(strategy.content)
         analysis = json_result["analysis"]
         strategy = json_result["strategy"]
+        is_explanation_needed = json_result["is_explanation_needed"]
         logger.info(f"Strategy Model Result: {json_result}")
-        return analysis, strategy
+        return analysis, strategy, is_explanation_needed
 
-    async def _run_reply_model(self, analysis: str, strategy: str) -> dict[str, str]:
+    async def _run_reply_model(
+        self, analysis: str, strategy: str, is_explanation_needed: bool
+    ) -> dict[str, str]:
         """
         Run the reply model to generate a reply based on analysis and strategy.
 
         Args:
             analysis (str): The analysis from previous steps.
             strategy (str): The strategy to be employed.
+            is_explanation_needed (bool):
+                Whether external medical knowledge or examination report is needed.
         Returns:
             str: The generated reply.
         """
 
-        prompt = self.doctor_reply_prompt.format(
-            diagnosis_data=self.diagnosis_data,
-            dialogue_history=self._get_dialogue_history(),
-            analysis=analysis,
-            strategy=strategy,
-        )
+        if is_explanation_needed:
+            explanation = await self.mdt.respond(
+                diagnosis_data=self.diagnosis_data,
+                dialogue_history=self._get_dialogue_history(),
+                analysis=analysis,
+                strategy=strategy,
+            )
+            logger.info(f"Explanation Model Result: {explanation}")
+
+            prompt = self.doctor_reply_prompt_with_explanation.format(
+                diagnosis_data=self.diagnosis_data,
+                dialogue_history=self._get_dialogue_history(),
+                analysis=analysis,
+                strategy=strategy,
+                explanation=explanation,
+            )
+        else:
+            prompt = self.doctor_reply_prompt.format(
+                diagnosis_data=self.diagnosis_data,
+                dialogue_history=self._get_dialogue_history(),
+                analysis=analysis,
+                strategy=strategy,
+            )
 
         reply = await self.reply_model.create(
             messages=[UserMessage(content=prompt, source="User")],
@@ -187,54 +193,11 @@ class Conversation:
         return reply.content
 
     async def run_conversation(self):
-        """
-        Run the conversation loop.
-        """
-
         turn_count = 0
         while turn_count < self.max_turns:
             turn_success = False
             try:
-                if not self.human_in_the_loop:
-                    if self.has_expert_knowledge:
-                        if turn_count == 0:
-                            tom_reasoning = {
-                                "patient_analysis": "null",
-                                "stage": "认知与邀请阶段",
-                            }
-                        else:
-                            tom_reasoning = await self._run_tom_reasoning()
-                        stage = tom_reasoning["stage"]
-                        patient_analysis = tom_reasoning["patient_analysis"]
-
-                        analysis, strategy = await self._run_strategy_model(
-                            stage=stage,
-                            analysis=patient_analysis,
-                        )
-                    else:
-                        tom_reasoning = {
-                            "patient_analysis": "human_input",
-                            "stage": "human_input",
-                        }
-                        analysis, strategy = await self._run_strategy_model(
-                            stage="",
-                            analysis="",
-                        )
-
-                    doctor_reply = await self._run_reply_model(analysis, strategy)
-                    doctor_ret = {
-                        "analysis": analysis,
-                        "strategy": strategy,
-                        "response": doctor_reply,
-                    }
-                    self.conversation_history.append(
-                        {
-                            "speaker": "Doctor",
-                            "tom_reasoning": tom_reasoning,
-                            "message": doctor_ret,
-                        }
-                    )
-                else:
+                if self.human_in_the_loop:
                     doctor_reply = input("Input Doctor Reply: ")
                     doctor_ret = {
                         "analysis": "human_input",
@@ -251,11 +214,53 @@ class Conversation:
                             "message": doctor_ret,
                         }
                     )
+                else:
+                    if self.has_expert_knowledge:
+                        if turn_count == 0:
+                            tom_reasoning = {
+                                "patient_analysis": "null",
+                                "stage": STAGE2NAME[0],
+                            }
+                        else:
+                            logger.info("Start ToM reasoning...")
+                            tom_reasoning = await self._run_tom_reasoning()
+                    else:
+                        tom_reasoning = {
+                            "patient_analysis": "human_input",
+                            "stage": "human_input",
+                        }
+                    stage = tom_reasoning["stage"]
+                    patient_analysis = tom_reasoning["patient_analysis"]
 
-                patient_ret = await self._run_dialogue()
+                    analysis, strategy, is_explanation_needed = await self._run_strategy_model(
+                        stage=stage,
+                        analysis=patient_analysis,
+                    )
 
+                    doctor_reply = await self._run_reply_model(
+                        analysis, strategy, is_explanation_needed
+                    )
+                    doctor_ret = {
+                        "analysis": analysis,
+                        "strategy": strategy,
+                        "response": doctor_reply,
+                    }
+                    self.conversation_history.append(
+                        {
+                            "speaker": "Doctor",
+                            "tom_reasoning": tom_reasoning,
+                            "message": doctor_ret,
+                        }
+                    )
+
+                patient_ret = await self.patient_agent.respond(
+                    dialogue_history=self._get_dialogue_history()
+                )
                 self.conversation_history.append(
-                    {"speaker": "Patient", "message": patient_ret}
+                    {
+                        "speaker": "Patient",
+                        "message": patient_ret,
+                    }
                 )
 
                 self.patient_scores.append(
@@ -317,14 +322,15 @@ class Conversation:
             "patient_id": self.patient_id,
             "patient_data": self.patient_data,
             "conversation_history": self.conversation_history,
-            "completed_turns": self.completed_turns,  # Include the actual number of turns
-            "negotiation_completed": self.negotiation_completed,  # Whether negotiation reached conclusion
-            "negotiation_result": self.negotiation_result,  # Result of the negotiation
+            "completed_turns": self.completed_turns,
+            "negotiation_completed": self.negotiation_completed,
+            "negotiation_result": self.negotiation_result,
             "models": {
                 "patient": self.patient_model_name,
                 "strategy": self.strategy_model_name,
                 "reply": self.reply_model_name,
                 "tom": self.tom_model_name,
+                "mdt": self.mdt_model_name,
             },
             "parameters": {
                 "max_turns": self.max_turns,

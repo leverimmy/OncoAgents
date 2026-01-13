@@ -13,7 +13,7 @@ class NotEmotionalPatient:
         self.user_profile = user_profile
         self.client = get_client(model_name)
         self.state = {
-            "tas_score": 0,
+            "pas_score": 0,
         }
 
     async def run_reply(self, dialogue_history: dict[str, str]) -> dict[str, str]:
@@ -38,7 +38,7 @@ class NotEmotionalPatient:
         try:
             reply = await self.run_reply(dialogue_history)
             self.state.update(reply)
-            return self.state
+            return reply
         except Exception as e:
             logger.error(f"Error in NotEmotionalPatient respond: {e}")
             return None

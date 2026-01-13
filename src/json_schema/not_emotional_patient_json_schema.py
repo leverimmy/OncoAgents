@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class NOT_EMOTIONAL_REPLY_JSON_SCHEMA(BaseModel):
-    tas_analysis: str = Field(description="对当前治疗方案的接受度分析")
-    tas_score: int = Field(ge=0, le=100, description="接受度评分，0-100分")
+    pas_analysis: str = Field(description="对当前情况的患者依从度分析")
+    pas_score: int = Field(ge=0, le=100, description="患者依从度，0-100分")
     decision: Literal["continue", "accept", "reject"] = Field(
         description="决策，只能为 continue / accept / reject"
     )

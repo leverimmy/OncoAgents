@@ -13,6 +13,7 @@ async def main(
     strategy_model_name: str,
     reply_model_name: str,
     tom_model_name: str,
+    mdt_model_name: str,
     max_turns: int,
     has_expert_knowledge: bool,
     human_in_the_loop: bool,
@@ -30,16 +31,21 @@ async def main(
             "diagnosis": case["diagnosis"],
             "treatment": case["treatment"],
         }
+        examination_data = {
+
+        }
 
     conversation = Conversation(
         patient_id=f"{data_id}",
         patient_data=patient_data,
         diagnosis_id=f"{data_id}",
         diagnosis_data=diagnosis_data,
+        examination_data=examination_data,
         patient_model_name=patient_model_name,
         strategy_model_name=strategy_model_name,
         reply_model_name=reply_model_name,
         tom_model_name=tom_model_name,
+        mdt_model_name=mdt_model_name,
         max_turns=max_turns,
         has_expert_knowledge=has_expert_knowledge,
         human_in_the_loop=human_in_the_loop,
@@ -78,6 +84,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--tom_model", type=str, default="gpt-4o", help="Theory of Mind model name."
+    )
+    parser.add_argument(
+        "--mdt_model", type=str, default="gpt-4o", help="MDT agent model name."
     )
 
     parser.add_argument(
@@ -119,6 +128,7 @@ if __name__ == "__main__":
             strategy_model_name=args.strategy_model,
             reply_model_name=args.reply_model,
             tom_model_name=args.tom_model,
+            mdt_model_name=args.mdt_model,
             max_turns=args.max_turns,
             has_expert_knowledge=args.expert_knowledge,
             human_in_the_loop=args.human_in_the_loop,

@@ -1,4 +1,4 @@
-from .conversation_json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
+from .doctor_json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
 from .emotional_patient_json_schema import (
     EMOTIONAL_JSON_SCHEMA,
     RATIONAL_JSON_SCHEMAS,
