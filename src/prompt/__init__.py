@@ -20,13 +20,13 @@ from .mdt_prompt import (
     RADIATION_ONCOLOGIST_SYSTEM_MESSAGE,
     RADIOLOGIST_SYSTEM_MESSAGE,
     SURGEON_SYSTEM_MESSAGE,
+    MDT_SYSTEM_MESSAGE,
+    MDT_PROMPT,
 )
 
 # Prompts for Not Emotional Patient agent
 from .not_emotional_patient_prompt import NOT_EMOTIONAL_REPLY_PROMPT
 
-# Prompts for profile formatting
-from .patient_prompt import PROFILE_PROMPT
 
 __all__ = [
     "DOCTOR_REPLY_PROMPT",
@@ -44,5 +44,6 @@ __all__ = [
     "SURGEON_SYSTEM_MESSAGE",
     "MEDICAL_ONCOLOGIST_SYSTEM_MESSAGE",
     "RADIATION_ONCOLOGIST_SYSTEM_MESSAGE",
-    "PROFILE_PROMPT",
+    "MDT_SYSTEM_MESSAGE",
+    "MDT_PROMPT",
 ]

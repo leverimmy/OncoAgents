@@ -4,6 +4,7 @@ from .emotional_patient_json_schema import (
     RATIONAL_JSON_SCHEMAS,
     REPLY_JSON_SCHEMA,
 )
+from .mdt_json_schema import MDT_JSON_SCHEMA
 from .not_emotional_patient_json_schema import NOT_EMOTIONAL_REPLY_JSON_SCHEMA
 
 __all__ = [
@@ -12,5 +13,6 @@ __all__ = [
     "REPLY_JSON_SCHEMA",
     "STRATEGY_JSON_SCHEMA",
     "TOM_REASONING_JSON_SCHEMA",
+    "MDT_JSON_SCHEMA",
     "NOT_EMOTIONAL_REPLY_JSON_SCHEMA",
 ]
