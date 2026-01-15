@@ -1,4 +1,0 @@
-PROFILE_PROMPT = """
-
-
-"""
