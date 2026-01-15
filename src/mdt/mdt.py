@@ -46,5 +46,12 @@ class MDT:
         for message in response.messages:
             if isinstance(message, BaseAgentEvent):
                 events.append(message)
-        logger.info(f"Memory: {events}")
+        for event in events:
+            for i, memory_content in enumerate(event.content):
+                metadata = memory_content.metadata
+                source = metadata.get("source", "N/A")
+                score = metadata.get("score", "N/A")
+                id = metadata.get("id", "N/A")
+                content = memory_content.content
+                logger.info(f"Memory Content [{i}]: source = {source} | score = {score} | id = {id}\n{content}")
         return response.messages[-1].content

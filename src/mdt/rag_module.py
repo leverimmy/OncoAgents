@@ -109,7 +109,7 @@ def get_persistent_memory(agent_name: str) -> ChromaDBVectorMemory:
             collection_name=f"{agent_name}_docs",
             persistence_path=db_path,
             k=10,  # Return top 10 results
-            score_threshold=0.4,  # Minimum similarity score
+            score_threshold=0.7,  # Minimum similarity score
             embedding_function_config=SentenceTransformerEmbeddingFunctionConfig()
         ),
     )
