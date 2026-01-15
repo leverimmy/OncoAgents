@@ -8,7 +8,8 @@ from src.conversation import Conversation
 
 async def main(
     data_dir: str,
-    data_id: int,
+    patient_id: int,
+    diagnosis_id: int,
     patient_model_name: str,
     strategy_model_name: str,
     reply_model_name: str,
@@ -20,25 +21,31 @@ async def main(
     is_emotional_patient: bool,
     output_dir: str,
 ):
-    with open(os.path.join(data_dir, f"{data_id}.json"), encoding="utf-8") as f:
-        case = json.load(f)
-        patient_data = {
-            "personal_info": case["personal_info"],
-            "symptom": case["symptom"],
-        }
-        diagnosis_data = {
-            "symptom": case["symptom"],
-            "diagnosis": case["diagnosis"],
-            "treatment": case["treatment"],
-        }
-        examination_data = {
-
-        }
+    # 合成患者画像
+    full_data = {}
+    with open(os.path.join(data_dir, "background", f"{patient_id}.json"), encoding="utf-8") as f:
+        full_data = json.load(f)
+    with open(os.path.join(data_dir, "diagnosis", f"{diagnosis_id}.json"), encoding="utf-8") as f:
+        diagnosis_data = json.load(f)
+        for k, v in diagnosis_data.items():
+            if k in full_data and isinstance(full_data[k], dict):
+                full_data[k].update(v)
+            else:
+                full_data[k] = v
+    
+    patient_data = {
+        "personal_info": full_data["personal_info"],
+        "symptom": full_data["symptom"],
+    }
+    examination_data = {
+        "physical_examination": full_data.get("physical_examination", ""),
+        "auxiliary_examination": full_data.get("auxiliary_examination", ""),
+    }
 
     conversation = Conversation(
-        patient_id=f"{data_id}",
+        patient_id=patient_id,
         patient_data=patient_data,
-        diagnosis_id=f"{data_id}",
+        diagnosis_id=diagnosis_id,
         diagnosis_data=diagnosis_data,
         examination_data=examination_data,
         patient_model_name=patient_model_name,
@@ -55,7 +62,7 @@ async def main(
     result = await conversation.run_conversation()
     conversation.save_conversation(
         os.path.join(
-            output_dir, f"final_conversation{'_human' if human_in_the_loop else ''}"
+            output_dir, f"final_conversation{'_human' if human_in_the_loop else ''}{'' if has_expert_knowledge else '_no_knowledge'}"
         )
     )
     print("Final Conversation Result:", result)
@@ -66,11 +73,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_dir",
         type=str,
-        default="data/patient_cases",
+        default="data/",
         help="Directory for patient and diagnosis data.",
     )
     parser.add_argument(
-        "--id", type=int, default=7, help="Patient and diagnosis ID number."
+        "--characteristic_id", type=int, default=1, help="Characteristic ID number."
+    )
+    parser.add_argument(
+        "--diagnosis_id", type=int, default=1, help="Diagnosis ID number."
     )
 
     parser.add_argument(
@@ -123,7 +133,8 @@ if __name__ == "__main__":
     asyncio.run(
         main(
             data_dir=args.data_dir,
-            data_id=args.id,
+            patient_id=args.characteristic_id,
+            diagnosis_id=args.diagnosis_id,
             patient_model_name=args.patient_model,
             strategy_model_name=args.strategy_model,
             reply_model_name=args.reply_model,

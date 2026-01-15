@@ -1,5 +1,6 @@
 import json
 import os
+import random
 
 from autogen_agentchat.messages import UserMessage
 
@@ -21,9 +22,9 @@ from src.utils import STAGE2NAME, logger
 class Conversation:
     def __init__(
         self,
-        patient_id: str,
+        patient_id: int,
         patient_data: dict[str, str],
-        diagnosis_id: str,
+        diagnosis_id: int,
         diagnosis_data: dict[str, str],
         examination_data: dict[str, str],
         patient_model_name: str,
@@ -313,7 +314,7 @@ class Conversation:
     def save_conversation(self, output_dir: str):
         os.makedirs(output_dir, exist_ok=True)
         output_file = os.path.join(
-            output_dir, f"dia{self.diagnosis_id}_patient{self.patient_id}.json"
+            output_dir, f"char_{self.patient_id}diag_{self.diagnosis_id}.json"
         )
 
         output_data = {
