@@ -1,10 +1,13 @@
-LOGGING_FILE_DIR=./logs python3 -m src.main --id 7 \
+LOGGING_FILE_DIR=./logs python3 -m src.main \
+    --data_dir ./data/ \
+    --characteristic_id 3 \
+    --diagnosis_id 1 \
     --patient_model o3 \
     --strategy_model Qwen/Qwen3-8B \
     --reply_model gpt-5-mini \
     --tom_model o3 \
-    --max_turns 5 \
+    --mdt_model o3 \
+    --max_turns 20 \
     --expert_knowledge \
     --is_emotional_patient \
-    --human_in_the_loop \
     --output_dir ./results
