@@ -1,28 +1,27 @@
 import json
-
 from autogen_agentchat.messages import UserMessage
 
 from src.backend import get_client
-from src.json_schema import (
+from src.json_schema.emotional_patient_json_schema_new import (
     EMOTIONAL_JSON_SCHEMA,
-    RATIONAL_JSON_SCHEMAS,
+    RATIONAL_JSON_SCHEMA,
     REPLY_JSON_SCHEMA,
 )
-from src.prompt import EMOTIONAL_PROMPTS, RATIONAL_PROMPTS, REPLY_PROMPTS
-from src.utils import NAME2STAGE, STAGE_E, STAGE_PI, SafeDict, logger, STAGE2NAME
+from src.prompt.emotional_patient_prompt_new import EMOTIONAL_PROMPT, RATIONAL_PROMPT, REPLY_PROMPT
+from src.utils import SafeDict, logger
 
 
-class EmotionalPatient:
+class NewEmotionalPatient:
     def __init__(self, user_profile: str, model_name: str) -> None:
         self.user_profile = user_profile
         self.model_name = model_name
         self.client = get_client(model_name)
-        self.emotion_stage = STAGE_PI
 
         self.state = {
-            "emotion_state": "",
             "knowledge": "",
             "information_gap": "",
+            "trust_state": "",
+            "emotion_state": "",
             "ccs_score": 0,
             "ess_score": 0,
             "pas_score": 0,
@@ -33,35 +32,30 @@ class EmotionalPatient:
             if key in current_state:
                 self.state[key] = current_state[key]
 
-    # TODO: dialogue_history 的类型感觉不一致
     async def run_rational_cot(
         self,
-        dialogue_history: dict[str, str],
-        emotion_analysis: str,
-        emotion_state: str,
-        ess_score: int,
+        dialogue_history: list[dict[str, str]],
     ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
+            emotion_state=self.state["emotion_state"],
+            ess_score=self.state["ess_score"],
             knowledge=self.state["knowledge"],
             information_gap=self.state["information_gap"],
             ccs_score=self.state["ccs_score"],
-            emotion_analysis=emotion_analysis,
-            emotion_state=emotion_state,
-            ess_score=ess_score,
         )
 
         rational_cot = await self.client.create(
             messages=[
                 UserMessage(
-                    content=RATIONAL_PROMPTS[self.emotion_stage].format_map(
+                    content=RATIONAL_PROMPT.format_map(
                         format_args
                     ),
                     source="User",
                 )
             ],
-            json_output=RATIONAL_JSON_SCHEMAS[self.emotion_stage],
+            json_output=RATIONAL_JSON_SCHEMA,
         )
 
         json_result = json.loads(rational_cot.content)
@@ -69,11 +63,12 @@ class EmotionalPatient:
         return json_result
 
     async def run_emotional_cot(
-        self, dialogue_history: dict[str, str]
+        self, dialogue_history: list[dict[str, str]],
     ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
             dialogue_history=dialogue_history,
+            trust_state=self.state["trust_state"],
             emotion_state=self.state["emotion_state"],
             ess_score=self.state["ess_score"],
         )
@@ -81,7 +76,7 @@ class EmotionalPatient:
         emotional_cot = await self.client.create(
             messages=[
                 UserMessage(
-                    content=EMOTIONAL_PROMPTS[self.emotion_stage].format_map(
+                    content=EMOTIONAL_PROMPT.format_map(
                         format_args
                     ),
                     source="User",
@@ -95,7 +90,7 @@ class EmotionalPatient:
         return json_result
 
     async def run_reply(
-        self, dialogue_history: dict[str, str], current_state: dict[str, str]
+        self, dialogue_history: list[dict[str, str]], current_state: dict[str, str]
     ) -> dict[str, str]:
         format_args = SafeDict(
             user_profile=self.user_profile,
@@ -104,7 +99,7 @@ class EmotionalPatient:
             knowledge=current_state.get("knowledge", ""),
             information_gap=current_state.get("information_gap", ""),
             ccs_score=current_state.get("ccs_score", ""),
-            emotion_analysis=current_state.get("emotion_analysis", ""),
+            trust_state=current_state.get("trust_state", ""),
             emotion_state=current_state.get("emotion_state", ""),
             ess_score=current_state.get("ess_score", ""),
             pas_score=self.state["pas_score"],
@@ -113,7 +108,7 @@ class EmotionalPatient:
         reply = await self.client.create(
             messages=[
                 UserMessage(
-                    content=REPLY_PROMPTS[self.emotion_stage].format_map(format_args),
+                    content=REPLY_PROMPT.format_map(format_args),
                     source="User",
                 )
             ],
@@ -123,20 +118,12 @@ class EmotionalPatient:
         return json.loads(reply.content)
 
     async def respond(
-        self, dialogue_history: dict[str, str]
+        self, dialogue_history: list[dict[str, str]]
     ) -> dict[str, int | str] | None:
-        # 并行运行 rational_cot 和 emotional_cot
-
-        # emotional_cot = await self.run_emotional_cot(dialogue_history)
-        # current_state = emotional_cot
-
         emotional_cot = await self.run_emotional_cot(dialogue_history)
-        rational_cot = await self.run_rational_cot(
-            dialogue_history=dialogue_history,
-            emotion_analysis=emotional_cot.get("emotion_analysis", ""),
-            emotion_state=emotional_cot.get("emotion_state", ""),
-            ess_score=emotional_cot.get("ess_score", 0),
-        )
+        self.update_state(emotional_cot)
+        # Rational CoT 会受到 Emotional CoT 结果的影响
+        rational_cot = await self.run_rational_cot(dialogue_history)
         
         current_state = {**rational_cot, **emotional_cot}
 
@@ -144,21 +131,8 @@ class EmotionalPatient:
         try:
             reply = await self.run_reply(dialogue_history, current_state)
 
-            next_stage = NAME2STAGE[reply["stage_transfer"]] if current_state.get("ess_score", 0) < 70 else STAGE_E
-
-            if next_stage != self.emotion_stage:
-                logger.info("Stage transfer occurred!")
-                self.emotion_stage = next_stage
-                # rational_cot, emotional_cot = await asyncio.gather(
-                #         self.run_rational_cot(dialogue_history),
-                #         self.run_emotional_cot(dialogue_history),
-                # )
-                # current_state = {**rational_cot, **emotional_cot}
-                # reply = await self.run_reply(dialogue_history, current_state)
-
             current_state.update(reply)
             self.update_state(current_state)
-            current_state["stage_transfer"] = STAGE2NAME[next_stage]
             logger.info(f"Current Patient State: {current_state}")
             return current_state
         except Exception as e:

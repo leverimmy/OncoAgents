@@ -22,10 +22,10 @@ EMOTIONAL_PROMPT_STAGE0 = """你是一位患者，正与一位医生进行对话
 ## 情绪思维 (Emotional Thoughts)
 
 1.  **情绪分析和情绪状态** (Emotional Analysis and Emotional State)
-    -   上一轮的情绪状态为：{emotional_state}
+    -   上一轮的情绪状态为：{emotion_state}
     -   思考：你是否做好了心理准备去面对可能的坏消息？你现在的情绪是怎样的？
-    -   请将对情绪的分析[输出到 `emotional_analysis`]
-    -   请将这一轮现在的情绪状态[输出到 `emotional_state`]
+    -   请将对情绪的分析[输出到 `emotion_analysis`]
+    -   请将这一轮现在的情绪状态[输出到 `emotion_state`]
 2.  **情绪压力度** (Emotional Stress Score)
     -   定义：一个 0-100 分的分数，表示你当前的情绪压力度，分数越高表示压力越大。
     -   评分细则：0-20 分：情绪非常平稳，20-40 分：情绪有些波动，40-60 分：情绪较为紧张，60-80 分：情绪压力大，80-100 分：情绪极度紧张。
@@ -61,10 +61,10 @@ EMOTIONAL_PROMPT_STAGE1 = """你是一位患者，正与一位医生进行对话
 ## 情绪思维 (Emotional Thoughts)
 
 1.  **情绪分析和情绪状态** (Emotional Analysis and Emotional State)
-    -   上一轮的情绪状态为：{emotional_state}
+    -   上一轮的情绪状态为：{emotion_state}
     -   思考：得知诊断结果后，你的情绪反应是怎样的？你现在的情绪是怎样的？
-    -   请将对情绪的分析[输出到 `emotional_analysis`]
-    -   请将这一轮现在的情绪状态[输出到 `emotional_state`]
+    -   请将对情绪的分析[输出到 `emotion_analysis`]
+    -   请将这一轮现在的情绪状态[输出到 `emotion_state`]
 2.  **情绪压力度** (Emotional Stress Score)
     -   定义：一个 0-100 分的分数，表示你当前的情绪压力度，分数越高表示压力越大。
     -   评分细则：0-20 分：情绪非常平稳，20-40 分：情绪有些波动，40-60 分：情绪较为紧张，60-80 分：情绪压力大，80-100 分：情绪极度紧张。
@@ -99,10 +99,10 @@ EMOTIONAL_PROMPT_STAGE2 = """你是一位患者，正与一位医生进行对话
 ## 情绪思维 (Emotional Thoughts)
 
 1.  **情绪分析和情绪状态** (Emotional Analysis and Emotional State)
-    -   上一轮的情绪状态为：{emotional_state}
+    -   上一轮的情绪状态为：{emotion_state}
     -   思考：经过 Doctor 的安慰后，你的情绪反应是怎样的？你现在的情绪是怎样的？
-    -   请将对情绪的分析[输出到 `emotional_analysis`]
-    -   请将这一轮现在的情绪状态[输出到 `emotional_state`]
+    -   请将对情绪的分析[输出到 `emotion_analysis`]
+    -   请将这一轮现在的情绪状态[输出到 `emotion_state`]
 2.  **情绪压力度** (Emotional Stress Score)
     -   定义：一个 0-100 分的分数，表示你当前的情绪压力度，分数越高表示压力越大。
     -   评分细则：0-20 分：情绪非常平稳，20-40 分：情绪有些波动，40-60 分：情绪较为紧张，60-80 分：情绪压力大，80-100 分：情绪极度紧张。
@@ -136,10 +136,10 @@ EMOTIONAL_PROMPT_STAGE3 = """你是一位患者，正与一位医生进行对话
 ## 情绪思维 (Emotional Thoughts)
 
 1.  **情绪分析和情绪状态** (Emotional Analysis and Emotional State)
-    -   上一轮的情绪状态为：{emotional_state}
+    -   上一轮的情绪状态为：{emotion_state}
     -   思考：经过 Doctor 的总结和计划后，你的情绪反应是怎样的？你现在的情绪是怎样的？
-    -   请将对情绪的分析[输出到 `emotional_analysis`]
-    -   请将这一轮现在的情绪状态[输出到 `emotional_state`]
+    -   请将对情绪的分析[输出到 `emotion_analysis`]
+    -   请将这一轮现在的情绪状态[输出到 `emotion_state`]
 2.  **情绪压力度** (Emotional Stress Score)
     -   定义：一个 0-100 分的分数，表示你当前的情绪压力度，分数越高表示压力越大。
     -   评分细则：0-20 分：情绪非常平稳，20-40 分：情绪有些波动，40-60 分：情绪较为紧张，60-80 分：情绪压力大，80-100 分：情绪极度紧张。

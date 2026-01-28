@@ -22,8 +22,6 @@ class RATIONAL_JSON_SCHEMA_STAGE1(BaseModel):
 class RATIONAL_JSON_SCHEMA_STAGE2(BaseModel):
     input_analysis: str = Field(description="对当前输入进行分析")
     knowledge: str = Field(description="对当前疾病掌握的相关知识")
-    gap_analysis: str = Field(description="当前存在的信息差距分析")
-    information_gap: str = Field(description="当前存在的信息差距")
     ccs_score: int = Field(
         ge=0,
         le=100,
@@ -44,7 +42,7 @@ class RATIONAL_JSON_SCHEMA_STAGE3(BaseModel):
 
 
 class EMOTIONAL_JSON_SCHEMA(BaseModel):
-    emotional_analysis: str = Field(description="对当前情绪进行分析")
+    emotion_analysis: str = Field(description="对当前情绪进行分析")
     emotion_state: str = Field(description="当前情绪状态描述")
     ess_score: int = Field(ge=0, le=100, description="情绪压力度，0-100分")
 
@@ -58,7 +56,6 @@ class REPLY_JSON_SCHEMA(BaseModel):
     )
     pas_analysis: str = Field(description="对当前情况的患者依从度分析")
     pas_score: int = Field(ge=0, le=100, description="患者依从度，0-100分")
-    stage_analysis: str = Field(description="当前阶段分析")
     decision: Literal["continue", "accept", "reject"] = Field(
         description="决策，只能为 continue / accept / reject"
     )
