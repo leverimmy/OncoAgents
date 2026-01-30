@@ -6,21 +6,12 @@ import re
 from pathlib import Path
 from autogen_agentchat.messages import UserMessage
 from pydantic import BaseModel
-
+from tqdm import tqdm
 
 from src.backend import get_client
-from src.json_schema import SYMPTOM_JSON_SCHEMA, PERSONAL_HISTORY_JSON_SCHEMA, AUXILIARY_EXAMINATION_JSON_SCHEMA, DIAGNOSIS_JSON_SCHEMA, TREATMENT_JSON_SCHEMA
-from src.prompt import SYMPTOM_PROMPT, PERSONAL_HISTORY_PROMPT, AUXILIARY_EXAMINATION_PROMPT, AUXILIARY_EXAMINATION_EXTRA_PROMPT, DIAGNOSIS_PROMPT, TREATMENT_PROMPT
+from src.json_schema import SYMPTOM_JSON_SCHEMA, PERSONAL_HISTORY_JSON_SCHEMA, AUXILIARY_EXAMINATION_JSON_SCHEMA, DIAGNOSIS_JSON_SCHEMA, TREATMENT_JSON_SCHEMA, ADDITONAL_INFO_JSON_SCHEMA
+from src.prompt import SYMPTOM_PROMPT, PERSONAL_HISTORY_PROMPT, AUXILIARY_EXAMINATION_PROMPT, AUXILIARY_EXAMINATION_EXTRA_PROMPT, DIAGNOSIS_PROMPT, TREATMENT_PROMPT, ADDITIONAL_INFO_PROMPT
 
-
-template_str = """你是一个专业的患者病历整理专家。请将以下患者病历转换为符合指定 JSON Schema 结构的 JSON 格式。
-
-## 输入的患者病历
-{input}
-
-## 当前已知信息
-{current}
-"""
 
 def pick(label: str, next_labels: list[str], *, text: str) -> str:
     """
@@ -106,38 +97,55 @@ async def extract_sections(text: str):
     }
 
 async def add_extra_info(text: str, existing_json: dict) -> dict:
-    auxiliary_examination_text = pick("扼要病情及治疗经过", ["出院诊断"], text=text)
-    diagnosis_text = pick("出院诊断", ["出院医嘱"], text=text)
-    treatment_text = pick("出院医嘱", ["患者（代理人）签字"], text=text)
+    # auxiliary_examination_text = pick("扼要病情及治疗经过", ["出院诊断"], text=text)
+    # diagnosis_text = pick("出院诊断", ["出院医嘱"], text=text)
+    # treatment_text = pick("出院医嘱", ["患者（代理人）签字"], text=text)
 
-    print("Auxiliary Examination Text:", auxiliary_examination_text)
+    # print("Auxiliary Examination Text:", auxiliary_examination_text)
 
-    auxiliary_examination = await get_llm_output(
-        AUXILIARY_EXAMINATION_EXTRA_PROMPT,
-        {"auxiliary_examination_text": auxiliary_examination_text, "auxiliary_examination_existing": json.dumps(existing_json.get("auxiliary_examination", {}))},
-        AUXILIARY_EXAMINATION_JSON_SCHEMA
+    # auxiliary_examination = await get_llm_output(
+    #     AUXILIARY_EXAMINATION_EXTRA_PROMPT,
+    #     {"auxiliary_examination_text": auxiliary_examination_text, "auxiliary_examination_existing": json.dumps(existing_json.get("auxiliary_examination", {}))},
+    #     AUXILIARY_EXAMINATION_JSON_SCHEMA
+    # )
+
+    # diagnosis = await get_llm_output(
+    #     DIAGNOSIS_PROMPT,
+    #     {"auxiliary_examination_text": auxiliary_examination_text,
+    #      "diagnosis_text": diagnosis_text,
+    #      "treatment_text": treatment_text},
+    #     DIAGNOSIS_JSON_SCHEMA
+    # )
+
+    # treatment = await get_llm_output(
+    #     TREATMENT_PROMPT,
+    #     {"auxiliary_examination_text": auxiliary_examination_text,
+    #      "diagnosis_text": diagnosis_text,
+    #      "treatment_text": treatment_text},
+    #     TREATMENT_JSON_SCHEMA
+    # )
+    results = await get_llm_output(
+        ADDITIONAL_INFO_PROMPT,
+        {
+            "input": text,
+            "symptom": json.dumps(existing_json.get("symptom", {})),
+            "diagnosis": existing_json.get("diagnosis", ""),
+            "treatment": existing_json.get("treatment", ""),
+            "auxiliary_examination": json.dumps(existing_json.get("auxiliary_examination", {})),
+        },
+        ADDITONAL_INFO_JSON_SCHEMA,
     )
-
-    diagnosis = await get_llm_output(
-        DIAGNOSIS_PROMPT,
-        {"auxiliary_examination_text": auxiliary_examination_text,
-         "diagnosis_text": diagnosis_text,
-         "treatment_text": treatment_text},
-        DIAGNOSIS_JSON_SCHEMA
-    )
-
-    treatment = await get_llm_output(
-        TREATMENT_PROMPT,
-        {"auxiliary_examination_text": auxiliary_examination_text,
-         "diagnosis_text": diagnosis_text,
-         "treatment_text": treatment_text},
-        TREATMENT_JSON_SCHEMA
-    )
-
-    existing_json["auxiliary_examination"] = auxiliary_examination
-    existing_json["diagnosis"] = diagnosis
-    existing_json["treatment"] = treatment
-
+    current_json = {
+        "symptom": {
+            "symptom_duration": results.get("symptom_duration", ""),
+            "chief_complaint": results.get("chief_complaint", ""),
+            "additional_symptom": results.get("additional_symptom", ""),
+        },
+        "diagnosis": results.get("diagnosis", ""),
+        "treatment": results.get("treatment", ""),
+        "auxiliary_examination": results.get("auxiliary_examination", []),
+    }
+    existing_json.update(current_json)
     return existing_json
 
 async def main():
@@ -151,7 +159,7 @@ async def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 枚举所有患者目录
-    for patient_dir in input_dir.iterdir():
+    for patient_dir in tqdm(list(input_dir.iterdir()), desc="Patients"):
         if patient_dir.is_dir():
             processed_json = {}
             dt = None
@@ -167,12 +175,12 @@ async def main():
                         if "NRS2002评分" in chunk:
                             processed_json = await extract_sections(chunk)
                             flag1 = True
-                        elif "出院日期:" in chunk:
+                        elif "一、入院情况" in chunk:
                             processed_json = await add_extra_info(chunk, processed_json)
                             flag2 = True
                         line = chunk.split('\n')[1].rstrip(':')
                         dt = datetime.datetime.strptime(line, '%Y-%m-%d %H:%M:%S')
-                        print(f"Processing chunk with timestamp: {dt}")
+                        # print(f"Processing chunk with timestamp: {dt}")
                         if flag1 and flag2:
                             break
             
@@ -193,7 +201,7 @@ async def main():
             output_file = output_dir / f"{patient_dir.name}_processed.json"
             with output_file.open('w', encoding='utf-8') as out_f:
                 json.dump(processed_json, out_f, ensure_ascii=False, indent=4)
-            break
+
 
 if __name__ == '__main__':
     asyncio.run(main())

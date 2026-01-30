@@ -38,3 +38,18 @@ class TREATMENT_JSON_SCHEMA(BaseModel):
     model_config = ConfigDict(extra="forbid")  # 严格：不允许额外字段
 
     treatment: str = Field(..., description="治疗方案内容")
+
+class ADDITONAL_INFO_JSON_SCHEMA(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 严格：不允许额外字段
+    
+    chief_complaint: str = Field(..., description="主诉")
+    additional_symptom: str = Field("", description="伴随症状/补充症状（可填“无”）")
+    symptom_duration: str = Field(..., description="症状持续时间")
+
+    diagnosis: str = Field(..., description="诊断结果内容")
+
+    treatment: str = Field(..., description="治疗方案内容")
+
+    auxiliary_examination: List[AuxiliaryExaminationItem] = Field(
+        ..., description="辅助检查列表"
+    )
