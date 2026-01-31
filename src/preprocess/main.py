@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from autogen_agentchat.messages import UserMessage
 from pydantic import BaseModel
-from tqdm import tqdm
+from tqdm.asyncio import tqdm  # 注意这里用 asyncio 版
 
 from src.backend import get_client
 from src.json_schema import SYMPTOM_JSON_SCHEMA, PERSONAL_HISTORY_JSON_SCHEMA, AUXILIARY_EXAMINATION_JSON_SCHEMA, DIAGNOSIS_JSON_SCHEMA, TREATMENT_JSON_SCHEMA, ADDITONAL_INFO_JSON_SCHEMA
@@ -32,8 +32,8 @@ def pick(label: str, next_labels: list[str], *, text: str) -> str:
 
 async def get_llm_output(prompt: str, args: dict, json_schema: BaseModel) -> dict:
     # TODO: 这个是不是该放到 utils 里？
-    # client = get_client("Qwen/Qwen3-8B", url="http://localhost:8000/v1/")
-    client = get_client("gpt-4o")
+    client = get_client("Qwen3-8B", url="http://localhost:8000/v1/")
+    # client = get_client("gpt-4o")
     response = await client.create(
         messages=[
             UserMessage(
@@ -145,63 +145,74 @@ async def add_extra_info(text: str, existing_json: dict) -> dict:
         "treatment": results.get("treatment", ""),
         "auxiliary_examination": results.get("auxiliary_examination", []),
     }
+    print(f"Diagnosis extracted: {current_json['diagnosis']}")
     existing_json.update(current_json)
     return existing_json
 
+async def process_patient(patient_dir: Path, output_dir: Path, sem: asyncio.Semaphore):
+    if not patient_dir.is_dir():
+        return
+
+    async with sem:
+        processed_json = {}
+        dt = None
+
+        diagnosis_file = patient_dir / "病历.txt"
+        if diagnosis_file.exists():
+            # 文件读写是同步IO；量不大一般没问题。若很大可改 asyncio.to_thread
+            with diagnosis_file.open("r", encoding="utf-8") as f:
+                input_text = f.read()
+
+            chunks = input_text.split("**********************************")
+            flag1, flag2 = False, False
+
+            for chunk in chunks[1:]:
+                if "NRS2002评分" in chunk:
+                    processed_json = await extract_sections(chunk)
+                    flag1 = True
+                elif "一、入院情况" in chunk:
+                    processed_json = await add_extra_info(chunk, processed_json)
+                    flag2 = True
+
+                # 每个 chunk 第二行是时间戳
+                line = chunk.split("\n")[1].rstrip(":")
+                dt = datetime.datetime.strptime(line, "%Y-%m-%d %H:%M:%S")
+
+                if flag1 and flag2:
+                    break
+
+        # 保存 JSON
+        output_file = output_dir / f"{patient_dir.name}_processed.json"
+        with output_file.open("w", encoding="utf-8") as out_f:
+            json.dump(processed_json, out_f, ensure_ascii=False, indent=4)
+
+        return patient_dir.name  # 可选：返回用于日志
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Preprocess patient diagnosis data.")
-    parser.add_argument('--input_dir', type=str, required=True, help='Path to the directory containing diagnosis data.')
-    parser.add_argument('--output_dir', type=str, required=True, help='Path to the output directory for processed JSON files.')
+    parser.add_argument("--input_dir", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--workers", type=int, default=16)
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 枚举所有患者目录
-    for patient_dir in tqdm(list(input_dir.iterdir()), desc="Patients"):
-        if patient_dir.is_dir():
-            processed_json = {}
-            dt = None
+    sem = asyncio.Semaphore(args.workers)
 
-            # 处理 `病历.txt`
-            diagnosis_file = patient_dir / "病历.txt"
-            if diagnosis_file.exists():
-                with diagnosis_file.open('r', encoding='utf-8') as f:
-                    input_text = f.read()
-                    chunks = input_text.split("**********************************")
-                    flag1, flag2 = False, False
-                    for chunk in chunks[1:]:
-                        if "NRS2002评分" in chunk:
-                            processed_json = await extract_sections(chunk)
-                            flag1 = True
-                        elif "一、入院情况" in chunk:
-                            processed_json = await add_extra_info(chunk, processed_json)
-                            flag2 = True
-                        line = chunk.split('\n')[1].rstrip(':')
-                        dt = datetime.datetime.strptime(line, '%Y-%m-%d %H:%M:%S')
-                        # print(f"Processing chunk with timestamp: {dt}")
-                        if flag1 and flag2:
-                            break
-            
-            # # 处理 `病理.txt`
-            # pathology_file = patient_dir / "病理.txt"
-            # if pathology_file.exists():
-            #     with pathology_file.open('r', encoding='utf-8') as f:
-            #         input_text = f.read()
-            #         chunks = input_text.split("**********************************")
-            #         for chunk in chunks[1:]:
-            #             line = chunk.split('\n')[1].rstrip(':')
-            #             chunk_dt = datetime.datetime.strptime(line, '%Y-%m-%d %H:%M:%S')
-            #             if chunk_dt <= dt:
-            #                 processed_json = await get_json(chunk, processed_json)
-            #             else:
-            #                 break
-            # 保存处理后的 JSON 文件
-            output_file = output_dir / f"{patient_dir.name}_processed.json"
-            with output_file.open('w', encoding='utf-8') as out_f:
-                json.dump(processed_json, out_f, ensure_ascii=False, indent=4)
+    patient_dirs = [p for p in input_dir.iterdir() if p.is_dir()]
+    tasks = [asyncio.create_task(process_patient(p, output_dir, sem)) for p in patient_dirs]
+
+    # 用 as_completed 边完成边更新进度条；遇到异常也更好定位
+    for coro in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Patients"):
+        try:
+            await coro
+        except Exception as e:
+            # 不中断全局处理：打印错误继续
+            print("Error:", repr(e))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
