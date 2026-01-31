@@ -6,6 +6,7 @@ from autogen_agentchat.messages import UserMessage
 
 from src.backend import get_client
 from src.emotional_patient import EmotionalPatient, NotEmotionalPatient
+from src.emotional_patient.emotional_patient_new import NewEmotionalPatient
 from src.json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
 from src.mdt import MDT
 from src.prompt import (
@@ -16,7 +17,7 @@ from src.prompt import (
     DOCTOR_TOM_PROMPT,
     STAGE_TO_EXPERT_KNOWLEDGE,
 )
-from src.utils import STAGE2NAME, logger
+from src.utils import STAGE2NAME, logger, render_user_profile
 
 
 class Conversation:
@@ -44,13 +45,14 @@ class Conversation:
         self.examination_data = examination_data
         self.patient_model_name = patient_model_name
         self.is_emotional_patient = is_emotional_patient
+        self.user_profile = render_user_profile(patient_data)
         if is_emotional_patient:
-            self.patient_agent = EmotionalPatient(
-                user_profile=patient_data, model_name=patient_model_name
+            self.patient_agent = NewEmotionalPatient(
+                user_profile=self.user_profile, model_name=patient_model_name
             )
         else:
             self.patient_agent = NotEmotionalPatient(
-                user_profile=patient_data, model_name=patient_model_name
+                user_profile=self.user_profile, model_name=patient_model_name
             )
         self.strategy_model_name = strategy_model_name
         self.strategy_model = get_client(strategy_model_name)
@@ -150,19 +152,8 @@ class Conversation:
 
     async def _run_reply_model(
         self, analysis: str, strategy: str, is_explanation_needed: bool
-    ) -> dict[str, str]:
-        """
-        Run the reply model to generate a reply based on analysis and strategy.
-
-        Args:
-            analysis (str): The analysis from previous steps.
-            strategy (str): The strategy to be employed.
-            is_explanation_needed (bool):
-                Whether external medical knowledge or examination report is needed.
-        Returns:
-            str: The generated reply.
-        """
-
+    ) -> tuple[str, dict[str, str] | None]:
+        explanation = None
         if is_explanation_needed:
             explanation = await self.mdt.respond(
                 diagnosis_data=self.diagnosis_data,
@@ -191,10 +182,10 @@ class Conversation:
             messages=[UserMessage(content=prompt, source="User")],
         )
         logger.info(f"Reply Model Result: {reply.content}")
-        return reply.content
+        return reply.content, explanation
 
     async def run_conversation(self):
-        turn_count = 0
+        turn_count = len(self.conversation_history) // 2
         while turn_count < self.max_turns:
             turn_success = False
             try:
@@ -204,6 +195,7 @@ class Conversation:
                         "analysis": "human_input",
                         "strategy": "human_input",
                         "response": doctor_reply,
+                        "explanation": "human_input",
                     }
                     self.conversation_history.append(
                         {
@@ -238,13 +230,14 @@ class Conversation:
                         analysis=patient_analysis,
                     )
 
-                    doctor_reply = await self._run_reply_model(
+                    doctor_reply, explanation = await self._run_reply_model(
                         analysis, strategy, is_explanation_needed
                     )
                     doctor_ret = {
                         "analysis": analysis,
                         "strategy": strategy,
                         "response": doctor_reply,
+                        "explanation": explanation,
                     }
                     self.conversation_history.append(
                         {
@@ -320,6 +313,7 @@ class Conversation:
         output_data = {
             "diagnosis_id": self.diagnosis_id,
             "diagnosis_data": self.diagnosis_data,
+            "examination_data": self.examination_data,
             "patient_id": self.patient_id,
             "patient_data": self.patient_data,
             "conversation_history": self.conversation_history,
@@ -343,3 +337,75 @@ class Conversation:
 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=4)
+
+    def load_conversation(self, json_path: str) -> None:
+        """
+        Load a conversation from a saved JSON file.
+        
+        Args:
+            json_path (str): Path to the saved conversation JSON file.
+        
+        Returns:
+            None
+        """
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Create a new Conversation instance with the loaded data
+        conversation = Conversation(
+            patient_id=data["patient_id"],
+            patient_data=data["patient_data"],
+            diagnosis_id=data["diagnosis_id"],
+            diagnosis_data=data["diagnosis_data"],
+            examination_data=data.get("examination_data", {}),
+            patient_model_name=data["models"]["patient"],
+            strategy_model_name=data["models"]["strategy"],
+            reply_model_name=data["models"]["reply"],
+            tom_model_name=data["models"]["tom"],
+            mdt_model_name=data["models"]["mdt"],
+            max_turns=data["parameters"]["max_turns"],
+            human_in_the_loop=data["parameters"]["human_in_the_loop"],
+            has_expert_knowledge=data["parameters"]["has_expert_knowledge"],
+            is_emotional_patient=data["parameters"]["is_emotional_patient"],
+        )
+        
+        # Restore conversation state
+        conversation.conversation_history = data["conversation_history"]
+        conversation.completed_turns = data["completed_turns"]
+        conversation.negotiation_completed = data["negotiation_completed"]
+        conversation.negotiation_result = data["negotiation_result"]
+        
+        logger.info(f"Loaded conversation with {len(conversation.conversation_history)} turns from {json_path}")
+
+        self = conversation
+    
+    def replay_from_turn(self, turn_index: int, new_doctor_message: str = None):
+        """
+        Replay the conversation from a specific turn, optionally with a modified doctor message.
+        
+        Args:
+            turn_index (int): The turn index to replay from (0-based).
+            new_doctor_message (str, optional): If provided, replace the doctor's message at this turn.
+        """
+        if turn_index < 0 or turn_index >= len(self.conversation_history):
+            logger.error(f"Invalid turn_index: {turn_index}")
+            return
+        
+        # Truncate conversation history to the specified turn
+        self.conversation_history = self.conversation_history[:turn_index]
+        
+        # If a new doctor message is provided, we'll need to regenerate from this point
+        if new_doctor_message:
+            # Find the last doctor turn and update it
+            for i in range(len(self.conversation_history) - 1, -1, -1):
+                if self.conversation_history[i]["speaker"] == "Doctor":
+                    self.conversation_history[i]["message"]["response"] = new_doctor_message
+                    logger.info(f"Updated doctor message at turn {i}")
+                    break
+        
+        # Reset negotiation state
+        self.negotiation_completed = False
+        self.negotiation_result = None
+        self.completed_turns = len(self.conversation_history)
+        
+        logger.info(f"Replaying from turn {turn_index}, conversation history truncated to {len(self.conversation_history)} turns")
