@@ -6,13 +6,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_client(name: str) -> OpenAIChatCompletionClient:
-    if name in ["gpt-4o", "o3", "gpt-5-mini"]:
-        return OpenAIChatCompletionClient(
-            model=name,
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_API_BASE_URL"),
-        )
+def get_client(name: str, url: str = None) -> OpenAIChatCompletionClient:
+    if url is None:
+        if name in ["gpt-4o", "o3", "gpt-5-mini"]:
+            return OpenAIChatCompletionClient(
+                model=name,
+                api_key=os.getenv("OPENAI_API_KEY"),
+                base_url=os.getenv("OPENAI_API_BASE_URL"),
+            )
+        else:
+            return OpenAIChatCompletionClient(
+                model=name,
+                model_info={
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "vision": False,
+                    "function_calling": True,
+                    "json_output": True,
+                    "family": "siliconflow",
+                    "structured_output": True,
+                },
+                api_key=os.getenv("SILICON_FLOW_API_KEY"),
+                base_url=os.getenv("SILICON_FLOW_API_BASE_URL"),
+            )
     else:
         return OpenAIChatCompletionClient(
             model=name,
@@ -22,9 +38,9 @@ def get_client(name: str) -> OpenAIChatCompletionClient:
                 "vision": False,
                 "function_calling": True,
                 "json_output": True,
-                "family": "siliconflow",
+                "family": "vllm",
                 "structured_output": True,
             },
-            api_key=os.getenv("SILICON_FLOW_API_KEY"),
-            base_url=os.getenv("SILICON_FLOW_API_BASE_URL"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=url,
         )
