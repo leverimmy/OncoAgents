@@ -4,14 +4,25 @@ import datetime
 import json
 import re
 from pathlib import Path
-from autogen_agentchat.messages import UserMessage
-from pydantic import BaseModel
-from tqdm.asyncio import tqdm  # 注意这里用 asyncio 版
+
+from tqdm.asyncio import tqdm
 
 from src.backend import get_client
-from src.json_schema import SYMPTOM_JSON_SCHEMA, PERSONAL_HISTORY_JSON_SCHEMA, AUXILIARY_EXAMINATION_JSON_SCHEMA, DIAGNOSIS_JSON_SCHEMA, TREATMENT_JSON_SCHEMA, ADDITONAL_INFO_JSON_SCHEMA
-from src.prompt import SYMPTOM_PROMPT, PERSONAL_HISTORY_PROMPT, AUXILIARY_EXAMINATION_PROMPT, AUXILIARY_EXAMINATION_EXTRA_PROMPT, DIAGNOSIS_PROMPT, TREATMENT_PROMPT, ADDITIONAL_INFO_PROMPT
+from src.json_schema import (
+    ADDITONAL_INFO_JSON_SCHEMA,
+    AUXILIARY_EXAMINATION_JSON_SCHEMA,
+    PERSONAL_HISTORY_JSON_SCHEMA,
+    SYMPTOM_JSON_SCHEMA,
+)
+from src.prompt import (
+    ADDITIONAL_INFO_PROMPT,
+    AUXILIARY_EXAMINATION_PROMPT,
+    PERSONAL_HISTORY_PROMPT,
+    SYMPTOM_PROMPT,
+)
+from src.utils import get_llm_output
 
+CLIENT = get_client("Qwen3-8B", url="http://localhost:8000/v1/")
 
 def pick(label: str, next_labels: list[str], *, text: str) -> str:
     """
@@ -30,21 +41,6 @@ def pick(label: str, next_labels: list[str], *, text: str) -> str:
     s = re.sub(r"\n{3,}", "\n\n", s)         # 过多空行
     return s.strip()
 
-async def get_llm_output(prompt: str, args: dict, json_schema: BaseModel) -> dict:
-    # TODO: 这个是不是该放到 utils 里？
-    client = get_client("Qwen3-8B", url="http://localhost:8000/v1/")
-    # client = get_client("gpt-4o")
-    response = await client.create(
-        messages=[
-            UserMessage(
-                content=prompt.format(**args),
-                source="User",
-            )
-        ],
-        json_output=json_schema,
-    )
-    return json.loads(response.content)
-
 async def extract_sections(text: str):
 
     name = pick("姓名", ["职业"], text=text)
@@ -62,9 +58,9 @@ async def extract_sections(text: str):
     auxiliary_examination_text = pick("辅  助  检  查", ["初步诊断"], text=text) or pick("辅助检查", ["初步诊断"], text=text)
 
     symptom, personal_history, auxiliary_examination = await asyncio.gather(
-        get_llm_output(SYMPTOM_PROMPT, {"symptom_text": symptom_text}, SYMPTOM_JSON_SCHEMA),
-        get_llm_output(PERSONAL_HISTORY_PROMPT, {"personal_history_text": personal_history_text}, PERSONAL_HISTORY_JSON_SCHEMA),
-        get_llm_output(AUXILIARY_EXAMINATION_PROMPT, {"auxiliary_examination_text": auxiliary_examination_text}, AUXILIARY_EXAMINATION_JSON_SCHEMA)
+        get_llm_output(SYMPTOM_PROMPT, {"symptom_text": symptom_text}, SYMPTOM_JSON_SCHEMA, CLIENT),
+        get_llm_output(PERSONAL_HISTORY_PROMPT, {"personal_history_text": personal_history_text}, PERSONAL_HISTORY_JSON_SCHEMA, CLIENT),
+        get_llm_output(AUXILIARY_EXAMINATION_PROMPT, {"auxiliary_examination_text": auxiliary_examination_text}, AUXILIARY_EXAMINATION_JSON_SCHEMA, CLIENT)
     )
 
     return {
@@ -106,7 +102,7 @@ async def add_extra_info(text: str, existing_json: dict) -> dict:
     # auxiliary_examination = await get_llm_output(
     #     AUXILIARY_EXAMINATION_EXTRA_PROMPT,
     #     {"auxiliary_examination_text": auxiliary_examination_text, "auxiliary_examination_existing": json.dumps(existing_json.get("auxiliary_examination", {}))},
-    #     AUXILIARY_EXAMINATION_JSON_SCHEMA
+    #     AUXILIARY_EXAMINATION_JSON_SCHEMA,CLIENT
     # )
 
     # diagnosis = await get_llm_output(
@@ -114,7 +110,7 @@ async def add_extra_info(text: str, existing_json: dict) -> dict:
     #     {"auxiliary_examination_text": auxiliary_examination_text,
     #      "diagnosis_text": diagnosis_text,
     #      "treatment_text": treatment_text},
-    #     DIAGNOSIS_JSON_SCHEMA
+    #     DIAGNOSIS_JSON_SCHEMA,CLIENT
     # )
 
     # treatment = await get_llm_output(
@@ -122,7 +118,7 @@ async def add_extra_info(text: str, existing_json: dict) -> dict:
     #     {"auxiliary_examination_text": auxiliary_examination_text,
     #      "diagnosis_text": diagnosis_text,
     #      "treatment_text": treatment_text},
-    #     TREATMENT_JSON_SCHEMA
+    #     TREATMENT_JSON_SCHEMA,CLIENT
     # )
     results = await get_llm_output(
         ADDITIONAL_INFO_PROMPT,
@@ -134,6 +130,7 @@ async def add_extra_info(text: str, existing_json: dict) -> dict:
             "auxiliary_examination": json.dumps(existing_json.get("auxiliary_examination", {})),
         },
         ADDITONAL_INFO_JSON_SCHEMA,
+        CLIENT,
     )
     current_json = {
         "symptom": {
