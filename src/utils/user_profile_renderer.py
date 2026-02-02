@@ -1,4 +1,3 @@
-import asyncio
 from autogen_agentchat.messages import UserMessage
 
 from src.backend.client import get_client
@@ -17,7 +16,7 @@ async def reiterate_symptom(symptom: dict[str, str], education_level: str) -> st
     
     return query.content
 
-def render_user_profile(patient_data: dict[str, str]) -> str:
+async def render_user_profile(patient_data: dict[str, str]) -> str:
     education_level = patient_data["personal_info"]["social_background"]["education_level"]
     financial_status = patient_data["personal_info"]["social_background"]["financial_status"]
     personality = patient_data["personal_info"]["characteristics"]["personality"]
@@ -29,5 +28,5 @@ def render_user_profile(patient_data: dict[str, str]) -> str:
 -   经济状况：{financial_status}
 -   性格特点：{personality}
 -   沟通风格：{communication_style}
--   当前症状：{asyncio.run(reiterate_symptom(symptom, education_level))}
+-   当前症状：{await reiterate_symptom(symptom, education_level)}
 """.strip()
