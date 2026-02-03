@@ -1,4 +1,3 @@
-# Prompts for conversation framework
 from .doctor_prompt import (
     DOCTOR_REPLY_PROMPT,
     DOCTOR_REPLY_PROMPT_WITH_EXPLANATION,
@@ -8,29 +7,16 @@ from .doctor_prompt import (
     STAGE_TO_EXPERT_KNOWLEDGE,
 )
 from .emotional_patient_prompt_emotional import EMOTIONAL_PROMPTS
-
-# Prompts for Emotional Patient agent
 from .emotional_patient_prompt_rational import RATIONAL_PROMPTS
 from .emotional_patient_prompt_reply import REPLY_PROMPTS
-
-# Prompts for Judge
-from .judge_prompt import JUDGE_PROMPT
-
-# Prompts for MDT agents
+from .judge_doctor_prompt import STAGE_TO_JUDGE_PROMPT
+from .judge_patient_prompt import JUDGE_PATIENT_PERSONA_PROMPT, JUDGE_PATIENT_HUMANLIKE_PROMPT
 from .mdt_prompt import (
-    MEDICAL_ONCOLOGIST_SYSTEM_MESSAGE,
-    PATHOLOGIST_SYSTEM_MESSAGE,
-    RADIATION_ONCOLOGIST_SYSTEM_MESSAGE,
-    RADIOLOGIST_SYSTEM_MESSAGE,
-    SURGEON_SYSTEM_MESSAGE,
     MDT_SYSTEM_MESSAGE,
     MDT_PROMPT,
+    QUERY_PROMPT,
 )
-
-# Prompts for Not Emotional Patient agent
 from .not_emotional_patient_prompt import NOT_EMOTIONAL_REPLY_PROMPT
-
-# Prompts for Preprocess
 from .preprocess_prompt import (
     SYMPTOM_PROMPT,
     PERSONAL_HISTORY_PROMPT,
@@ -40,6 +26,7 @@ from .preprocess_prompt import (
     TREATMENT_PROMPT,
     ADDITIONAL_INFO_PROMPT,
 )
+from .rag_test_prompt import RAG_TEST_PROMPT
 
 
 __all__ = [
@@ -60,7 +47,7 @@ __all__ = [
     "RADIATION_ONCOLOGIST_SYSTEM_MESSAGE",
     "MDT_SYSTEM_MESSAGE",
     "MDT_PROMPT",
-    "JUDGE_PROMPT",
+    "QUERY_PROMPT",
     "SYMPTOM_PROMPT",
     "PERSONAL_HISTORY_PROMPT",
     "AUXILIARY_EXAMINATION_PROMPT",
@@ -68,4 +55,8 @@ __all__ = [
     "DIAGNOSIS_PROMPT",
     "TREATMENT_PROMPT",
     "ADDITIONAL_INFO_PROMPT",
+    "STAGE_TO_JUDGE_PROMPT",
+    "JUDGE_PATIENT_PERSONA_PROMPT",
+    "JUDGE_PATIENT_HUMANLIKE_PROMPT",
+    "RAG_TEST_PROMPT",
 ]

@@ -61,7 +61,7 @@ DENSE_TOPK = 30
 BM25_TOPK = 50
 
 # 最终 topk
-FINAL_TOPK = 3
+FINAL_TOPK = 10
 
 # 最终过滤：content 至少包含多少汉字
 MIN_HAN_IN_CONTENT = 5
@@ -543,7 +543,7 @@ def hybrid_search_answer(query: str) -> list[dict[str, int | str]]:
     bm25_topk = BM25_TOPK
     dense_topk = DENSE_TOPK
     query = (query or "").strip()
-    print("[TOOL] hybrid_search_answer_tool called with query:", query)
+    # print("[TOOL] hybrid_search_answer_tool called with query:", query)
     if not query:
         return []
 
@@ -588,7 +588,7 @@ def hybrid_search_answer(query: str) -> list[dict[str, int | str]]:
             obj["field_sims"] = {str(f): float(v) for f, v in fs.items()}
 
         out_list.append(obj)
-    print("[TOOL] hybrid_search_answer_tool returned: ", out_list)
+    # print("[TOOL] hybrid_search_answer_tool returned: ", out_list)
 
     return out_list
 

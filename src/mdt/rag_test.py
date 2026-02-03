@@ -5,6 +5,7 @@ import random
 from pathlib import Path
 
 from autogen_agentchat.messages import UserMessage
+from tqdm import tqdm
 
 from src.backend import get_client
 from src.json_schema import RAG_TEST_JSON_SCHEMA
@@ -83,6 +84,26 @@ async def main():
 
     print(f"Average Relevance Score: {relevance_score / turns:.2f}")
 
+async def main2():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--data_path', type=str, default='data/knowledge/primary/chunks.jsonl')
+    parser.add_argument('--count', type=int, default=1000)
+    args = parser.parse_args()
+
+    random.seed(args.seed)
+    documents = []
+    with open(args.data_path, encoding='utf-8') as f:
+        documents = [json.loads(line) for line in f.readlines()]
+    rec = turns = 0
+    for _ in tqdm(range(args.count)):
+        query = random.choice(documents)['content']
+        responses = hybrid_search_answer(query)
+        contents = [r["content"] for r in responses]
+        rec += 1 if query in contents else 0
+        turns += 1
+    print(f"Retrieval Rate: {rec / turns:.4f}")
+
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(main2())

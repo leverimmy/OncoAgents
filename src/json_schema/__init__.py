@@ -1,12 +1,25 @@
-from .preprocess_json_schema import AUXILIARY_EXAMINATION_JSON_SCHEMA, PERSONAL_HISTORY_JSON_SCHEMA, SYMPTOM_JSON_SCHEMA, DIAGNOSIS_JSON_SCHEMA, TREATMENT_JSON_SCHEMA, ADDITONAL_INFO_JSON_SCHEMA
 from .doctor_json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
 from .emotional_patient_json_schema import (
     EMOTIONAL_JSON_SCHEMA,
     RATIONAL_JSON_SCHEMAS,
     REPLY_JSON_SCHEMA,
 )
-from .mdt_json_schema import MDT_JSON_SCHEMA
+from .judge_doctor_json_schema import JUDGE_DOCTOR_JSON_SCHEMA
+from .judge_patient_json_schema import (
+    JUDGE_PATIENT_JSON_SCHEMA_humanlikeness,
+    JUDGE_PATIENT_JSON_SCHEMA_persona,
+)
+from .mdt_json_schema import MDT_JSON_SCHEMA, QUERY_JSON_SCHEMA
 from .not_emotional_patient_json_schema import NOT_EMOTIONAL_REPLY_JSON_SCHEMA
+from .preprocess_json_schema import (
+    ADDITONAL_INFO_JSON_SCHEMA,
+    AUXILIARY_EXAMINATION_JSON_SCHEMA,
+    DIAGNOSIS_JSON_SCHEMA,
+    PERSONAL_HISTORY_JSON_SCHEMA,
+    SYMPTOM_JSON_SCHEMA,
+    TREATMENT_JSON_SCHEMA,
+)
+from .rag_test_json_schema import RAG_TEST_JSON_SCHEMA
 
 __all__ = [
     "RATIONAL_JSON_SCHEMAS",
@@ -15,6 +28,7 @@ __all__ = [
     "STRATEGY_JSON_SCHEMA",
     "TOM_REASONING_JSON_SCHEMA",
     "MDT_JSON_SCHEMA",
+    "QUERY_JSON_SCHEMA",
     "NOT_EMOTIONAL_REPLY_JSON_SCHEMA",
     "SYMPTOM_JSON_SCHEMA",
     "PERSONAL_HISTORY_JSON_SCHEMA",
@@ -22,4 +36,8 @@ __all__ = [
     "DIAGNOSIS_JSON_SCHEMA",
     "TREATMENT_JSON_SCHEMA",
     "ADDITONAL_INFO_JSON_SCHEMA",
+    "JUDGE_DOCTOR_JSON_SCHEMA",
+    "JUDGE_PATIENT_JSON_SCHEMA_persona",
+    "JUDGE_PATIENT_JSON_SCHEMA_humanlikeness",
+    "RAG_TEST_JSON_SCHEMA",
 ]
