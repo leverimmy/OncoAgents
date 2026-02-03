@@ -1,13 +1,19 @@
+import asyncio
 import json
 import os
-import random
 
 from autogen_agentchat.messages import UserMessage
 
 from src.backend import get_client
 from src.emotional_patient import EmotionalPatient, NotEmotionalPatient
 from src.emotional_patient.emotional_patient_new import NewEmotionalPatient
-from src.json_schema import STRATEGY_JSON_SCHEMA, TOM_REASONING_JSON_SCHEMA
+from src.json_schema import (
+    JUDGE_DOCTOR_JSON_SCHEMA,
+    STRATEGY_JSON_SCHEMA,
+    TOM_REASONING_JSON_SCHEMA,
+    JUDGE_PATIENT_JSON_SCHEMA_humanlikeness,
+    JUDGE_PATIENT_JSON_SCHEMA_persona,
+)
 from src.mdt import MDT
 from src.prompt import (
     DOCTOR_REPLY_PROMPT,
@@ -15,9 +21,12 @@ from src.prompt import (
     DOCTOR_STRATEGY_PROMPT,
     DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE,
     DOCTOR_TOM_PROMPT,
+    JUDGE_PATIENT_HUMANLIKE_PROMPT,
+    JUDGE_PATIENT_PERSONA_PROMPT,
     STAGE_TO_EXPERT_KNOWLEDGE,
+    STAGE_TO_JUDGE_PROMPT,
 )
-from src.utils import STAGE2NAME, logger, render_user_profile
+from src.utils import STAGE2NAME, SafeDict, logger, render_user_profile
 
 
 class Conversation:
@@ -33,10 +42,13 @@ class Conversation:
         reply_model_name: str,
         tom_model_name: str,
         mdt_model_name: str,
+        judge_model_name: str,
         max_turns: int = 20,
         human_in_the_loop: bool = False,
         has_expert_knowledge: bool = False,
         is_emotional_patient: bool = True,
+        do_eval_patient: bool = False,
+        do_eval_doctor: bool = False,
     ) -> None:
         self.patient_id = patient_id
         self.patient_data = patient_data
@@ -45,15 +57,7 @@ class Conversation:
         self.examination_data = examination_data
         self.patient_model_name = patient_model_name
         self.is_emotional_patient = is_emotional_patient
-        self.user_profile = render_user_profile(patient_data)
-        if is_emotional_patient:
-            self.patient_agent = NewEmotionalPatient(
-                user_profile=self.user_profile, model_name=patient_model_name
-            )
-        else:
-            self.patient_agent = NotEmotionalPatient(
-                user_profile=self.user_profile, model_name=patient_model_name
-            )
+
         self.strategy_model_name = strategy_model_name
         self.strategy_model = get_client(strategy_model_name)
         self.reply_model_name = reply_model_name
@@ -62,9 +66,13 @@ class Conversation:
         self.tom_model = get_client(tom_model_name)
         self.mdt_model_name = mdt_model_name
         self.mdt = MDT(mdt_model_name, self.examination_data)
+        self.judge_model_name = judge_model_name
+        self.judge_model = get_client(judge_model_name)
 
         self.human_in_the_loop = human_in_the_loop
         self.has_expert_knowledge = has_expert_knowledge
+        self.do_eval_patient = do_eval_patient
+        self.do_eval_doctor = do_eval_doctor
 
         self.max_turns = max_turns
         self.negotiation_completed = False
@@ -81,6 +89,21 @@ class Conversation:
         self.doctor_reply_prompt = DOCTOR_REPLY_PROMPT
         self.doctor_reply_prompt_with_explanation = DOCTOR_REPLY_PROMPT_WITH_EXPLANATION
         self.doctor_tom_prompt = DOCTOR_TOM_PROMPT
+
+    async def initialize(self):
+        """异步初始化 User Profile 和 Patient Agent"""
+        # 1. 生成 User Profile
+        self.user_profile = await render_user_profile(self.patient_data)
+        
+        # 2. 初始化 Patient Agent (它依赖 user_profile)
+        if self.is_emotional_patient:
+            self.patient_agent = NewEmotionalPatient(
+                user_profile=self.user_profile, model_name=self.patient_model_name
+            )
+        else:
+            self.patient_agent = NotEmotionalPatient(
+                user_profile=self.user_profile, model_name=self.patient_model_name
+            )
 
     def _get_dialogue_history(self) -> str:
         dialogue_history = []
@@ -184,6 +207,49 @@ class Conversation:
         logger.info(f"Reply Model Result: {reply.content}")
         return reply.content, explanation
 
+    async def _run_judge_patient_model(self) -> dict[str, int | str]:
+        format_args = SafeDict(
+            patient_data=self.patient_data,
+            diagnosis_data=self.diagnosis_data,
+            dialogue_history=self._get_dialogue_history(),
+        )
+        prompt_1 = JUDGE_PATIENT_PERSONA_PROMPT.format_map(format_args)
+        prompt_2 = JUDGE_PATIENT_HUMANLIKE_PROMPT.format_map(format_args)
+        judge_response_1, judge_response_2 = await asyncio.gather(
+            self.judge_model.create(
+                messages=[UserMessage(content=prompt_1, source="User")],
+                json_output=JUDGE_PATIENT_JSON_SCHEMA_persona,
+            ),
+            self.judge_model.create(
+                messages=[UserMessage(content=prompt_2, source="User")],
+                json_output=JUDGE_PATIENT_JSON_SCHEMA_humanlikeness,
+            ),
+        )
+        json_result_1 = json.loads(judge_response_1.content)
+        json_result_2 = json.loads(judge_response_2.content)
+        json_result = {
+            "persona_evaluation": json_result_1,
+            "humanlikeness_evaluation": json_result_2,
+        }
+        logger.info(f"Judge Model Result: {json_result}")
+        return json_result
+    
+    async def _run_judge_doctor_model(self, strategy: str, stage: str) -> dict[str, int | str]:
+        format_args = SafeDict(
+            patient_data=self.patient_data,
+            diagnosis_data=self.diagnosis_data,
+            dialogue_history=self._get_dialogue_history(),
+            strategy=strategy,
+        )
+        prompt = STAGE_TO_JUDGE_PROMPT[stage].format_map(format_args)
+        judge_response = await self.judge_model.create(
+            messages=[UserMessage(content=prompt, source="User")],
+            json_output=JUDGE_DOCTOR_JSON_SCHEMA,
+        )
+        json_result = json.loads(judge_response.content)
+        logger.info(f"Judge Doctor Model Result: {json_result}")
+        return json_result
+
     async def run_conversation(self):
         turn_count = len(self.conversation_history) // 2
         while turn_count < self.max_turns:
@@ -264,6 +330,25 @@ class Conversation:
                         "pas_score": patient_ret.get("pas_score", 0),
                     }
                 )
+
+                current_scores = {
+                    "patient": None,
+                    "doctor": None,
+                }
+
+                if self.do_eval_patient:
+                    judge_ret_patient = await self._run_judge_patient_model()
+                    current_scores["patient"] = judge_ret_patient
+                
+                if self.do_eval_doctor:
+                    judge_ret_doctor = await self._run_judge_doctor_model(
+                        strategy=doctor_ret["strategy"],
+                        stage=stage,
+                    )
+                    current_scores["doctor"] = judge_ret_doctor
+                
+                self.judge_scores.append(current_scores)
+
                 turn_success = True
             except Exception as e:
                 logger.error(f"Unexpected error during negotiation: {e}")
@@ -298,7 +383,7 @@ class Conversation:
         logger.info(f"Negotiation result: {self.negotiation_result}")
 
         return {
-            # "judge_scores": self.judge_scores,
+            "judge_scores": self.judge_scores,
             "patient_scores": self.patient_scores,
             "negotiation_result": self.negotiation_result,
             "completed_turns": self.completed_turns,
@@ -316,29 +401,38 @@ class Conversation:
             "examination_data": self.examination_data,
             "patient_id": self.patient_id,
             "patient_data": self.patient_data,
+            "user_profile": self.user_profile,
             "conversation_history": self.conversation_history,
             "completed_turns": self.completed_turns,
             "negotiation_completed": self.negotiation_completed,
             "negotiation_result": self.negotiation_result,
+            "scores": {
+                "judge_scores": self.judge_scores,
+                "patient_scores": self.patient_scores,
+            },
             "models": {
                 "patient": self.patient_model_name,
                 "strategy": self.strategy_model_name,
                 "reply": self.reply_model_name,
                 "tom": self.tom_model_name,
                 "mdt": self.mdt_model_name,
+                "judge": self.judge_model_name,
             },
             "parameters": {
                 "max_turns": self.max_turns,
                 "has_expert_knowledge": self.has_expert_knowledge,
                 "human_in_the_loop": self.human_in_the_loop,
                 "is_emotional_patient": self.is_emotional_patient,
+                "do_eval_patient": self.do_eval_patient,
+                "do_eval_doctor": self.do_eval_doctor,
             },
         }
 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=4)
 
-    def load_conversation(self, json_path: str) -> None:
+    # TODO: load_conversation 没有用，而且需要重构
+    async def load_conversation(self, json_path: str) -> None:
         """
         Load a conversation from a saved JSON file.
         
@@ -348,7 +442,7 @@ class Conversation:
         Returns:
             None
         """
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
         
         # Create a new Conversation instance with the loaded data
@@ -363,13 +457,30 @@ class Conversation:
             reply_model_name=data["models"]["reply"],
             tom_model_name=data["models"]["tom"],
             mdt_model_name=data["models"]["mdt"],
+            judge_model_name=data["models"]["judge"],
             max_turns=data["parameters"]["max_turns"],
             human_in_the_loop=data["parameters"]["human_in_the_loop"],
             has_expert_knowledge=data["parameters"]["has_expert_knowledge"],
             is_emotional_patient=data["parameters"]["is_emotional_patient"],
+            do_eval_patient=data["parameters"]["do_eval_patient"],
+            do_eval_doctor=data["parameters"]["do_eval_doctor"],
         )
         
+        conversation.user_profile = data["user_profile"]
+        if conversation.is_emotional_patient:
+            conversation.patient_agent = NewEmotionalPatient(
+                user_profile=conversation.user_profile,
+                model_name=conversation.patient_model_name,
+            )
+        else:
+            conversation.patient_agent = NotEmotionalPatient(
+                user_profile=conversation.user_profile,
+                model_name=conversation.patient_model_name,
+            )
+
         # Restore conversation state
+        conversation.judge_scores = data["scores"]["judge_scores"]
+        conversation.patient_scores = data["scores"]["patient_scores"]
         conversation.conversation_history = data["conversation_history"]
         conversation.completed_turns = data["completed_turns"]
         conversation.negotiation_completed = data["negotiation_completed"]
@@ -378,6 +489,7 @@ class Conversation:
         logger.info(f"Loaded conversation with {len(conversation.conversation_history)} turns from {json_path}")
 
         self = conversation
+        
     
     def replay_from_turn(self, turn_index: int, new_doctor_message: str = None):
         """

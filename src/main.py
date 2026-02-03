@@ -15,10 +15,13 @@ async def main(
     reply_model_name: str,
     tom_model_name: str,
     mdt_model_name: str,
+    judge_model_name: str,
     max_turns: int,
     has_expert_knowledge: bool,
     human_in_the_loop: bool,
     is_emotional_patient: bool,
+    do_eval_patient: bool,
+    do_eval_doctor: bool,
     output_dir: str,
 ):
     # 合成患者画像
@@ -53,11 +56,15 @@ async def main(
         reply_model_name=reply_model_name,
         tom_model_name=tom_model_name,
         mdt_model_name=mdt_model_name,
+        judge_model_name=judge_model_name,
         max_turns=max_turns,
         has_expert_knowledge=has_expert_knowledge,
         human_in_the_loop=human_in_the_loop,
         is_emotional_patient=is_emotional_patient,
+        do_eval_patient=do_eval_patient,
+        do_eval_doctor=do_eval_doctor,
     )
+    await conversation.initialize()
 
     result = await conversation.run_conversation()
     conversation.save_conversation(
@@ -98,6 +105,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mdt_model", type=str, default="gpt-4o", help="MDT agent model name."
     )
+    parser.add_argument(
+        "--judge_model", type=str, default="gpt-4o", help="Judge model name."
+    )
 
     parser.add_argument(
         "--max_turns",
@@ -121,6 +131,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Set patient as emotional or not.",
     )
+    parser.add_argument(
+        "--do_eval_patient", action="store_true", help="Whether to do patient evaluation."
+    )
+    parser.add_argument(
+        "--do_eval_doctor", action="store_true", help="Whether to do doctor evaluation."
+    )
 
     parser.add_argument(
         "--output_dir",
@@ -140,10 +156,13 @@ if __name__ == "__main__":
             reply_model_name=args.reply_model,
             tom_model_name=args.tom_model,
             mdt_model_name=args.mdt_model,
+            judge_model_name=args.judge_model,
             max_turns=args.max_turns,
             has_expert_knowledge=args.expert_knowledge,
             human_in_the_loop=args.human_in_the_loop,
             is_emotional_patient=args.is_emotional_patient,
+            do_eval_patient=args.do_eval_patient,
+            do_eval_doctor=args.do_eval_doctor,
             output_dir=args.output_dir,
         )
     )
