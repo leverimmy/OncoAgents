@@ -1,58 +1,42 @@
-import json
-
-from autogen_agentchat.messages import UserMessage
-
-from src.backend import get_client
-from src.json_schema import MDT_JSON_SCHEMA, QUERY_JSON_SCHEMA
+from src.backend import LanguageModel
 from src.mdt.ragtool import hybrid_search_answer
-from src.prompt import MDT_PROMPT, QUERY_PROMPT
+from src.prompt import MDT_PROMPT
+from src.utils import SafeDict
 
 
 class MDT:
-    def __init__(self, model_name: str, examination_data: dict[str, str]):
+    def __init__(self, model_name: str, url: str | None, examination_data: dict[str, str]):
         self.model_name = model_name
-        self.client = get_client(model_name)
+        self.model = LanguageModel(model_name=model_name, url=url)
         self.examination_data = examination_data
 
-    async def respond(
+    def respond(
         self,
-        diagnosis_data: dict[str, str],
-        dialogue_history: dict[str, str],
-        analysis: str,
-        strategy: str
+        keywords: list[str],
     ) -> list[dict[str, str]]:
-        query_prompt = QUERY_PROMPT.format(
-            diagnosis_data=diagnosis_data,
-            dialogue_history=dialogue_history,
-            examination_data=self.examination_data,
-            analysis=analysis,
-            strategy=strategy,
-        )
-        keywords = await self.client.create(
-            messages=[UserMessage(content=query_prompt, source="User")],
-            json_output=QUERY_JSON_SCHEMA,
-        )
-        json_result = json.loads(keywords.content)
 
-        answers = []
-        for keyword in json_result["items"]:
-            answers.append({
+        pairs = []
+        for keyword in keywords:
+            pairs.append({
                 "query": keyword,
                 "answer": hybrid_search_answer(keyword),
             })
         
-        prompt = MDT_PROMPT.format(
-            diagnosis_data=diagnosis_data,
-            dialogue_history=dialogue_history,
-            examination_data=self.examination_data,
-            analysis=analysis,
-            strategy=strategy,
-            results=answers,
-        )
-
-        queries = await self.client.create(
-            messages=[UserMessage(content=prompt, source="User")],
-            json_output=MDT_JSON_SCHEMA,
-        )
-
-        return json.loads(queries.content)
+        if len(pairs) > 3:
+            pairs = pairs[:3]
+        for pair in pairs:
+            explanation_args = SafeDict(
+                query=pair["query"],
+                examination_data=self.examination_data,
+                answer=pair["answer"],
+            )
+            explanation = self.model.chat(
+                prompt=MDT_PROMPT.format_map(explanation_args),
+                json_format=False,
+            )
+            pair["explanation"] = explanation
+        
+        return [{
+            "query": pair["query"],
+            "explanation": pair["explanation"],
+        } for pair in pairs]
