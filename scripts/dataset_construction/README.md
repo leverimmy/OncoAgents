@@ -9,8 +9,9 @@ uv run python3 main.py \
     --background_dir ../../data/background \
     --diagnosis_dir ../../data/diagnosis \
     --output_dir ../../data/test \
-    --sample_size=30 \
-    --seed=30
+    --sample_size 30 \
+    --seed 42 \
+    --max_workers 8
 ```
 
 Visualize the distribution of generated patient backgrounds:
