@@ -14,16 +14,16 @@ class MDT:
         self,
         keywords: list[str],
     ) -> list[dict[str, str]]:
-
+        
+        if len(keywords) > 3:
+            keywords = keywords[:3]
         pairs = []
         for keyword in keywords:
             pairs.append({
                 "query": keyword,
                 "answer": hybrid_search_answer(keyword),
             })
-        
-        if len(pairs) > 3:
-            pairs = pairs[:3]
+
         for pair in pairs:
             explanation_args = SafeDict(
                 query=pair["query"],
