@@ -26,7 +26,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py313"
-exclude = ["src/prompt"]
+exclude = ["**/*_prompt.py"]
 
 [tool.ruff.lint]
 select = [
