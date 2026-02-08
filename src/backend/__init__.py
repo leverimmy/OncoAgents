@@ -1,5 +1,5 @@
-from .client import get_client
+from .language_model import LanguageModel
 
 __all__ = [
-    "get_client",
+    "LanguageModel",
 ]
