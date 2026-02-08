@@ -1,93 +1,136 @@
 import argparse
-import asyncio
 import json
-import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+from tqdm import tqdm
 
 from src.conversation import Conversation
 
 
-async def main(
-    data_dir: str,
-    patient_id: int,
-    diagnosis_id: int,
+def run_one_file(
+    input_file: Path,
     patient_model_name: str,
     strategy_model_name: str,
     reply_model_name: str,
-    tom_model_name: str,
     mdt_model_name: str,
     judge_model_name: str,
+    url: str | None,
     max_turns: int,
-    has_expert_knowledge: bool,
     human_in_the_loop: bool,
+    has_expert_knowledge: bool,
     is_emotional_patient: bool,
+    is_baseline: bool,
     do_eval_patient: bool,
     do_eval_doctor: bool,
     output_dir: str,
-):
-    # 合成患者画像
-    full_data = {}
-    with open(os.path.join(data_dir, "background", f"{patient_id}.json"), encoding="utf-8") as f:
-        full_data = json.load(f)
-    with open(os.path.join(data_dir, "diagnosis", f"{diagnosis_id}.json"), encoding="utf-8") as f:
-        diagnosis_data = json.load(f)
-        for k, v in diagnosis_data.items():
-            if k in full_data and isinstance(full_data[k], dict):
-                full_data[k].update(v)
-            else:
-                full_data[k] = v
-    
-    patient_data = {
-        "personal_info": full_data["personal_info"],
-        "symptom": full_data["symptom"],
-    }
-    examination_data = {
-        "physical_examination": full_data.get("physical_examination", ""),
-        "auxiliary_examination": full_data.get("auxiliary_examination", ""),
-    }
+) -> str:
+    file_name = input_file.name
+    with open(input_file, encoding="utf-8") as f:
+        data = json.load(f)
+        patient_data = {
+            "personal_info": data["personal_info"],
+            "symptom": data["symptom"],
+            "reiterated_symptom": data["reiterated_symptom"],
+        }
+        diagnosis_data = {
+            "personal_info": data["personal_info"],
+            "symptom": data["symptom"],
+            "physical_examination": data["physical_examination"],
+            "auxiliary_examination": data["auxiliary_examination"],
+            "diagnosis": data["diagnosis"],
+            "treatment": data["treatment"],
+        }
 
-    conversation = Conversation(
-        patient_id=patient_id,
-        patient_data=patient_data,
-        diagnosis_id=diagnosis_id,
-        diagnosis_data=diagnosis_data,
-        examination_data=examination_data,
-        patient_model_name=patient_model_name,
-        strategy_model_name=strategy_model_name,
-        reply_model_name=reply_model_name,
-        tom_model_name=tom_model_name,
-        mdt_model_name=mdt_model_name,
-        judge_model_name=judge_model_name,
-        max_turns=max_turns,
-        has_expert_knowledge=has_expert_knowledge,
-        human_in_the_loop=human_in_the_loop,
-        is_emotional_patient=is_emotional_patient,
-        do_eval_patient=do_eval_patient,
-        do_eval_doctor=do_eval_doctor,
-    )
-    await conversation.initialize()
-
-    result = await conversation.run_conversation()
-    conversation.save_conversation(
-        os.path.join(
-            output_dir, f"final_conversation{'_human' if human_in_the_loop else ''}{'' if has_expert_knowledge else '_no_knowledge'}"
+        conversation = Conversation(
+            file_name=file_name,
+            patient_data=patient_data,
+            diagnosis_data=diagnosis_data,
+            patient_model_name=patient_model_name,
+            strategy_model_name=strategy_model_name,
+            reply_model_name=reply_model_name,
+            mdt_model_name=mdt_model_name,
+            judge_model_name=judge_model_name,
+            url=url,
+            max_turns=max_turns,
+            human_in_the_loop=human_in_the_loop,
+            has_expert_knowledge=has_expert_knowledge,
+            is_emotional_patient=is_emotional_patient,
+            is_baseline=is_baseline,
+            do_eval_patient=do_eval_patient,
+            do_eval_doctor=do_eval_doctor,
         )
-    )
-    print("Final Conversation Result:", result)
+
+        conversation.run_conversation()
+        conversation.save_conversation(output_dir)
+    return file_name
+
+def main(
+    input_dir: str,
+    patient_model_name: str,
+    strategy_model_name: str,
+    reply_model_name: str,
+    mdt_model_name: str,
+    judge_model_name: str,
+    url: str | None,
+    max_turns: int,
+    human_in_the_loop: bool,
+    has_expert_knowledge: bool,
+    is_emotional_patient: bool,
+    is_baseline: bool,
+    do_eval_patient: bool,
+    do_eval_doctor: bool,
+    output_dir: str,
+    max_workers: int,
+):
+    input_dir = Path(input_dir)
+    input_files = sorted(input_dir.glob("*.json"))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {
+            ex.submit(
+                run_one_file,
+                f,
+                patient_model_name=patient_model_name,
+                strategy_model_name=strategy_model_name,
+                reply_model_name=reply_model_name,
+                mdt_model_name=mdt_model_name,
+                judge_model_name=judge_model_name,
+                url=url,
+                max_turns=max_turns,
+                human_in_the_loop=human_in_the_loop,
+                has_expert_knowledge=has_expert_knowledge,
+                is_emotional_patient=is_emotional_patient,
+                is_baseline=is_baseline,
+                do_eval_patient=do_eval_patient,
+                do_eval_doctor=do_eval_doctor,
+                output_dir=output_dir,
+            ): f
+            for f in input_files
+        }
+
+        ok = 0
+        fail = 0
+
+        for fut in tqdm(as_completed(futures), total=len(futures), desc="Conversations"):
+            input_file = futures[fut]
+            try:
+                file_name = fut.result()
+                ok += 1
+                # print(f"[OK] {file_name}: {result}")
+            except Exception as e:
+                fail += 1
+                print(f"[FAIL] {input_file.name}: {repr(e)}")
+
+        print(f"[DONE] total={len(input_files)} ok={ok} fail={fail}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run conversation with patient.")
     parser.add_argument(
-        "--data_dir",
+        "--input_dir",
         type=str,
-        default="data/",
         help="Directory for patient and diagnosis data.",
-    )
-    parser.add_argument(
-        "--characteristic_id", type=int, default=1, help="Characteristic ID number."
-    )
-    parser.add_argument(
-        "--diagnosis_id", type=int, default=1, help="Diagnosis ID number."
     )
 
     parser.add_argument(
@@ -100,13 +143,13 @@ if __name__ == "__main__":
         "--reply_model", type=str, default="gpt-4o", help="Reply model name."
     )
     parser.add_argument(
-        "--tom_model", type=str, default="gpt-4o", help="Theory of Mind model name."
-    )
-    parser.add_argument(
         "--mdt_model", type=str, default="gpt-4o", help="MDT agent model name."
     )
     parser.add_argument(
         "--judge_model", type=str, default="gpt-4o", help="Judge model name."
+    )
+    parser.add_argument(
+        "--url", type=str, default="", help="URL for API calls.",
     )
 
     parser.add_argument(
@@ -115,21 +158,23 @@ if __name__ == "__main__":
         default=20,
         help="Maximum number of conversation turns.",
     )
-
-    parser.add_argument(
-        "--expert_knowledge",
-        action="store_true",
-        help="Enable expert knowledge in strategy model.",
-    )
     parser.add_argument(
         "--human_in_the_loop",
         action="store_true",
         help="Enable human in the loop for replies.",
     )
     parser.add_argument(
+        "--expert_knowledge",
+        action="store_true",
+        help="Enable expert knowledge in strategy model.",
+    )
+    parser.add_argument(
         "--is_emotional_patient",
         action="store_true",
         help="Set patient as emotional or not.",
+    )
+    parser.add_argument(
+        "--is_baseline", action="store_true", help="Whether to use baseline doctor reply prompt."
     )
     parser.add_argument(
         "--do_eval_patient", action="store_true", help="Whether to do patient evaluation."
@@ -141,28 +186,31 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="results",
         help="Directory to save conversation results.",
+    )
+    parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=4,
+        help="Maximum number of worker threads for concurrent conversation runs.",
     )
 
     args = parser.parse_args()
-    asyncio.run(
-        main(
-            data_dir=args.data_dir,
-            patient_id=args.characteristic_id,
-            diagnosis_id=args.diagnosis_id,
-            patient_model_name=args.patient_model,
-            strategy_model_name=args.strategy_model,
-            reply_model_name=args.reply_model,
-            tom_model_name=args.tom_model,
-            mdt_model_name=args.mdt_model,
-            judge_model_name=args.judge_model,
-            max_turns=args.max_turns,
-            has_expert_knowledge=args.expert_knowledge,
-            human_in_the_loop=args.human_in_the_loop,
-            is_emotional_patient=args.is_emotional_patient,
-            do_eval_patient=args.do_eval_patient,
-            do_eval_doctor=args.do_eval_doctor,
-            output_dir=args.output_dir,
-        )
+    main(
+        input_dir=args.input_dir,
+        patient_model_name=args.patient_model,
+        strategy_model_name=args.strategy_model,
+        reply_model_name=args.reply_model,
+        mdt_model_name=args.mdt_model,
+        judge_model_name=args.judge_model,
+        url=args.url if len(args.url) > 0 else None,
+        max_turns=args.max_turns,
+        human_in_the_loop=args.human_in_the_loop,
+        has_expert_knowledge=args.expert_knowledge,
+        is_emotional_patient=args.is_emotional_patient,
+        is_baseline=args.is_baseline,
+        do_eval_patient=args.do_eval_patient,
+        do_eval_doctor=args.do_eval_doctor,
+        output_dir=args.output_dir,
+        max_workers=args.max_workers,
     )

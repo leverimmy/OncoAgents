@@ -1,76 +1,65 @@
-import asyncio
 import json
-import os
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-from autogen_agentchat.messages import UserMessage
-
-from src.backend import get_client
-from src.emotional_patient import EmotionalPatient, NotEmotionalPatient
-from src.emotional_patient.emotional_patient_new import NewEmotionalPatient
-from src.json_schema import (
-    JUDGE_DOCTOR_JSON_SCHEMA,
-    STRATEGY_JSON_SCHEMA,
-    TOM_REASONING_JSON_SCHEMA,
-    JUDGE_PATIENT_JSON_SCHEMA_humanlikeness,
-    JUDGE_PATIENT_JSON_SCHEMA_persona,
-)
+from src.backend import LanguageModel
+from src.emotional_patient import NewEmotionalPatient, NotEmotionalPatient
 from src.mdt import MDT
 from src.prompt import (
+    DOCTOR_BASELINE_REPLY_PROMPT,
     DOCTOR_REPLY_PROMPT,
     DOCTOR_REPLY_PROMPT_WITH_EXPLANATION,
     DOCTOR_STRATEGY_PROMPT,
     DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE,
-    DOCTOR_TOM_PROMPT,
-    JUDGE_PATIENT_HUMANLIKE_PROMPT,
+    JUDGE_DOCTOR_COVERAGE_PROMPT,
+    JUDGE_DOCTOR_HUMANITY_PROMPT,
+    JUDGE_DOCTOR_REITERATION_PROMPT,
+    JUDGE_DOCTOR_SAFETY_PROMPT,
+    JUDGE_PATIENT_HUMANLIKENESS_PROMPT,
     JUDGE_PATIENT_PERSONA_PROMPT,
-    STAGE_TO_EXPERT_KNOWLEDGE,
-    STAGE_TO_JUDGE_PROMPT,
 )
-from src.utils import STAGE2NAME, SafeDict, logger, render_user_profile
+from src.utils import SafeDict, logger, render_user_profile
 
 
 class Conversation:
     def __init__(
         self,
-        patient_id: int,
+        file_name: str,
         patient_data: dict[str, str],
-        diagnosis_id: int,
         diagnosis_data: dict[str, str],
-        examination_data: dict[str, str],
         patient_model_name: str,
         strategy_model_name: str,
         reply_model_name: str,
-        tom_model_name: str,
         mdt_model_name: str,
         judge_model_name: str,
-        max_turns: int = 20,
+        url: str | None = None,
+        max_turns: int = 15,
         human_in_the_loop: bool = False,
         has_expert_knowledge: bool = False,
         is_emotional_patient: bool = True,
+        is_baseline: bool = False,
         do_eval_patient: bool = False,
         do_eval_doctor: bool = False,
-    ) -> None:
-        self.patient_id = patient_id
+    ):
+        # patient_data 包含 personal_info、symptom 和 reiterated_symptom
+        # diagnosis_data 包含 personal_info、symptom、physical_examination、auxiliary_examination、diagnosis 和 treatment
+        self.file_name = file_name
         self.patient_data = patient_data
-        self.diagnosis_id = diagnosis_id
         self.diagnosis_data = diagnosis_data
-        self.examination_data = examination_data
-        self.patient_model_name = patient_model_name
-        self.is_emotional_patient = is_emotional_patient
 
-        self.strategy_model_name = strategy_model_name
-        self.strategy_model = get_client(strategy_model_name)
-        self.reply_model_name = reply_model_name
-        self.reply_model = get_client(reply_model_name)
-        self.tom_model_name = tom_model_name
-        self.tom_model = get_client(tom_model_name)
-        self.mdt_model_name = mdt_model_name
-        self.mdt = MDT(mdt_model_name, self.examination_data)
-        self.judge_model_name = judge_model_name
-        self.judge_model = get_client(judge_model_name)
+        self.strategy_model = LanguageModel(model_name=strategy_model_name, url=url)
+        self.reply_model = LanguageModel(model_name=reply_model_name, url=url)
+        self.judge_model = LanguageModel(model_name=judge_model_name, url=url)
+        self.mdt = MDT(
+            model_name=mdt_model_name,
+            url=url,
+            examination_data=self.diagnosis_data
+        )
 
         self.human_in_the_loop = human_in_the_loop
         self.has_expert_knowledge = has_expert_knowledge
+        self.is_emotional_patient = is_emotional_patient
+        self.is_baseline = is_baseline
         self.do_eval_patient = do_eval_patient
         self.do_eval_doctor = do_eval_doctor
 
@@ -79,37 +68,31 @@ class Conversation:
         self.negotiation_result = None  # "accept", "reject", "error"
         self.conversation_history = []
         self.completed_turns = 0
-        self.judge_scores = []
+        self.judge_doctor_scores = {}
+        self.judge_patient_scores = {}
         self.patient_scores = []
 
-        self.doctor_strategy_prompt = DOCTOR_STRATEGY_PROMPT
-        self.doctor_strategy_prompt_with_expert_knowledge = (
-            DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE
-        )
-        self.doctor_reply_prompt = DOCTOR_REPLY_PROMPT
-        self.doctor_reply_prompt_with_explanation = DOCTOR_REPLY_PROMPT_WITH_EXPLANATION
-        self.doctor_tom_prompt = DOCTOR_TOM_PROMPT
-
-    async def initialize(self):
-        """异步初始化 User Profile 和 Patient Agent"""
-        # 1. 生成 User Profile
-        self.user_profile = await render_user_profile(self.patient_data)
-        
-        # 2. 初始化 Patient Agent (它依赖 user_profile)
         if self.is_emotional_patient:
             self.patient_agent = NewEmotionalPatient(
-                user_profile=self.user_profile, model_name=self.patient_model_name
+                user_profile=render_user_profile(self.patient_data, "Patient"),
+                model_name=patient_model_name,
+                url=url,
             )
         else:
             self.patient_agent = NotEmotionalPatient(
-                user_profile=self.user_profile, model_name=self.patient_model_name
+                user_profile=render_user_profile(self.patient_data, "Patient"),
+                model_name=patient_model_name,
+                url=url,
             )
+        self.user_profile = render_user_profile(self.patient_data, "Doctor")
 
-    def _get_dialogue_history(self) -> str:
+    def _get_dialogue_history(self, role: str | None = None) -> list[dict[str, str]]:
         dialogue_history = []
         for turn in self.conversation_history:
             try:
                 assert turn["speaker"] in ["Doctor", "Patient"]
+                if role is not None and turn["speaker"] != role:
+                    continue
                 dialogue_history.append(
                     {"speaker": turn["speaker"], "message": turn["message"]["response"]}
                 )
@@ -117,116 +100,147 @@ class Conversation:
                 logger.error(f'Error processing turn: {turn}, turn["speaker"]: {e}')
         return json.dumps(dialogue_history, ensure_ascii=False)
 
-    def _get_dialogue_history_with_stage(self) -> str:
-        dialogue_history = []
-        for turn in self.conversation_history:
-            if turn["speaker"] == "Doctor":
-                dialogue_history.append(
-                    {
-                        "speaker": "Doctor",
-                        "message": turn["message"]["response"],
-                        "stage": turn["tom_reasoning"]["stage"],
-                    }
-                )
-            else:
-                dialogue_history.append(
-                    {"speaker": "Patient", "message": turn["message"]["response"]}
-                )
-        return json.dumps(dialogue_history, ensure_ascii=False)        
+    # TODO: 这是给 DPO 的时候生成数据用的
 
-    async def _run_tom_reasoning(self) -> dict[str, str]:
-        stage_prompt = self.doctor_tom_prompt.format(
-            dialogue_history=self._get_dialogue_history_with_stage()
-        )
-        tom_reasoning = await self.tom_model.create(
-            messages=[UserMessage(content=stage_prompt, source="User")],
-            json_output=TOM_REASONING_JSON_SCHEMA,
-        )
-        json_result = json.loads(tom_reasoning.content)
-        logger.info(f"ToM Reasoning Result: {json_result}")
-        return json_result
+    # def _get_dialogue_history_with_stage(self) -> list[dict[str, str]]:
+    #     dialogue_history = []
+    #     for turn in self.conversation_history:
+    #         if turn["speaker"] == "Doctor":
+    #             dialogue_history.append(
+    #                 {
+    #                     "speaker": "Doctor",
+    #                     "message": turn["message"]["response"],
+    #                 }
+    #             )
+    #         else:
+    #             dialogue_history.append(
+    #                 {"speaker": "Patient", "message": turn["message"]["response"]}
+    #             )
+    #     return json.dumps(dialogue_history, ensure_ascii=False)
 
-    async def _run_strategy_model(
-        self, stage: str, analysis: str
-    ) -> tuple[str, str, bool]:
+    # def _get_dialogue_history_with_strategy(self) -> list[dict[str, str]]:
+    #     dialogue_history = []
+    #     for i, turn in enumerate(self.conversation_history):
+    #         if turn["speaker"] == "Doctor":
+    #             dialogue_history.append(
+    #                 {
+    #                     "speaker": "Doctor",
+    #                     "idx": i // 2,
+    #                     "strategy": turn["message"]["strategy"],
+    #                     "response": turn["message"]["response"],
+    #                 }
+    #             )
+    #         else:
+    #             dialogue_history.append(
+    #                 {"speaker": "Patient", "response": turn["message"]["response"]}
+    #             )
+    #     return json.dumps(dialogue_history, ensure_ascii=False)
+
+    def _run_strategy_model(
+        self,
+    ) -> tuple[str, str, str, list[str]]:
         if self.has_expert_knowledge:
-            prompt = self.doctor_strategy_prompt_with_expert_knowledge.format(
+            format_args = SafeDict(
+                user_profile=self.user_profile,
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
-                expert_knowledge=STAGE_TO_EXPERT_KNOWLEDGE[stage],
-                patient_analysis=analysis,
+            )
+            json_result = self.strategy_model.chat(
+                prompt = DOCTOR_STRATEGY_PROMPT_WITH_EXPERT_KNOWLEDGE.format_map(format_args),
+                json_format=True,
             )
         else:
-            prompt = self.doctor_strategy_prompt.format(
+            format_args = SafeDict(
+                user_profile=self.user_profile,
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
             )
-
-        strategy = await self.strategy_model.create(
-            messages=[UserMessage(content=prompt, source="User")],
-            json_output=STRATEGY_JSON_SCHEMA,
-        )
-        json_result = json.loads(strategy.content)
+            json_result = self.strategy_model.chat(
+                prompt = DOCTOR_STRATEGY_PROMPT.format_map(format_args),
+                json_format=True,
+            )
+        # TODO: 这里可能会出现解析错误，增加异常处理
+        stage = json_result.get("stage", "no_expert_knowledge")
         analysis = json_result["analysis"]
         strategy = json_result["strategy"]
-        is_explanation_needed = json_result["is_explanation_needed"]
-        logger.info(f"Strategy Model Result: {json_result}")
-        return analysis, strategy, is_explanation_needed
+        keywords = json_result.get("keywords", [])
 
-    async def _run_reply_model(
-        self, analysis: str, strategy: str, is_explanation_needed: bool
-    ) -> tuple[str, dict[str, str] | None]:
-        explanation = None
-        if is_explanation_needed:
-            explanation = await self.mdt.respond(
-                diagnosis_data=self.diagnosis_data,
-                dialogue_history=self._get_dialogue_history(),
-                analysis=analysis,
-                strategy=strategy,
+        logger.info(f"Strategy Model Result: {json_result}")
+        return stage, analysis, strategy, keywords
+
+    def _run_reply_model(
+        self, analysis: str, strategy: str, keywords: list[str],
+    ) -> tuple[str, list[dict[str, str]]]:
+        explanation = []
+        if len(keywords) > 0:
+            explanation = self.mdt.respond(
+                keywords=keywords,
             )
             logger.info(f"Explanation Model Result: {explanation}")
 
-            prompt = self.doctor_reply_prompt_with_explanation.format(
+            format_args = SafeDict(
+                user_profile=self.user_profile,
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
                 analysis=analysis,
                 strategy=strategy,
                 explanation=explanation,
             )
+            reply = self.reply_model.chat(
+                prompt=DOCTOR_REPLY_PROMPT_WITH_EXPLANATION.format_map(format_args),
+                json_format=False,
+            )
         else:
-            prompt = self.doctor_reply_prompt.format(
+            format_args = SafeDict(
+                user_profile=self.user_profile,
                 diagnosis_data=self.diagnosis_data,
                 dialogue_history=self._get_dialogue_history(),
                 analysis=analysis,
                 strategy=strategy,
             )
-
-        reply = await self.reply_model.create(
-            messages=[UserMessage(content=prompt, source="User")],
-        )
-        logger.info(f"Reply Model Result: {reply.content}")
-        return reply.content, explanation
-
-    async def _run_judge_patient_model(self) -> dict[str, int | str]:
+            reply = self.reply_model.chat(
+                prompt=DOCTOR_REPLY_PROMPT.format_map(format_args),
+                json_format=False,
+            )
+        logger.info(f"Reply Model Result: {reply}")
+        return reply, explanation
+    
+    def _run_baseline_reply_model(self) -> str:
         format_args = SafeDict(
-            patient_data=self.patient_data,
             diagnosis_data=self.diagnosis_data,
             dialogue_history=self._get_dialogue_history(),
         )
-        prompt_1 = JUDGE_PATIENT_PERSONA_PROMPT.format_map(format_args)
-        prompt_2 = JUDGE_PATIENT_HUMANLIKE_PROMPT.format_map(format_args)
-        judge_response_1, judge_response_2 = await asyncio.gather(
-            self.judge_model.create(
-                messages=[UserMessage(content=prompt_1, source="User")],
-                json_output=JUDGE_PATIENT_JSON_SCHEMA_persona,
-            ),
-            self.judge_model.create(
-                messages=[UserMessage(content=prompt_2, source="User")],
-                json_output=JUDGE_PATIENT_JSON_SCHEMA_humanlikeness,
-            ),
+        reply = self.reply_model.chat(
+            prompt=DOCTOR_BASELINE_REPLY_PROMPT.format_map(format_args),
+            json_format=False,
         )
-        json_result_1 = json.loads(judge_response_1.content)
-        json_result_2 = json.loads(judge_response_2.content)
+        logger.info(f"Baseline Reply Model Result: {reply}")
+        return reply
+
+    def _run_judge_patient_model(self) -> dict[str, int | str]:
+        format_args = SafeDict(
+            user_profile=render_user_profile(
+                patient_data=self.patient_data,
+                role="Doctor",
+                with_symptom=False
+            ),
+            diagnosis_data=self.diagnosis_data,
+            dialogue_history=self._get_dialogue_history(),
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            judge_patient_persona_future = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_PATIENT_PERSONA_PROMPT.format_map(format_args),
+                json_format=True,
+            )
+            judge_patient_humanlikeness_future = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_PATIENT_HUMANLIKENESS_PROMPT.format_map(format_args),
+                json_format=True,
+            )
+            json_result_1 = judge_patient_persona_future.result()
+            json_result_2 = judge_patient_humanlikeness_future.result()
+
         json_result = {
             "persona_evaluation": json_result_1,
             "humanlikeness_evaluation": json_result_2,
@@ -234,23 +248,85 @@ class Conversation:
         logger.info(f"Judge Model Result: {json_result}")
         return json_result
     
-    async def _run_judge_doctor_model(self, strategy: str, stage: str) -> dict[str, int | str]:
+    def _run_judge_doctor_model(self) -> dict[str, int | str]:
         format_args = SafeDict(
-            patient_data=self.patient_data,
+            user_profile=self.user_profile,
             diagnosis_data=self.diagnosis_data,
             dialogue_history=self._get_dialogue_history(),
-            strategy=strategy,
         )
-        prompt = STAGE_TO_JUDGE_PROMPT[stage].format_map(format_args)
-        judge_response = await self.judge_model.create(
-            messages=[UserMessage(content=prompt, source="User")],
-            json_output=JUDGE_DOCTOR_JSON_SCHEMA,
+
+        disease_name = self.diagnosis_data.get("diagnosis", {}).get("disease_name", "")
+        stage = self.diagnosis_data.get("diagnosis", {}).get("stage", "")
+        plan = self.diagnosis_data.get("treatment", {}).get("plan", "")
+        course = self.diagnosis_data.get("treatment", {}).get("course", "")
+
+        format_args_2 = SafeDict(
+            disease_name=disease_name,
+            stage=stage,
+            plan=plan,
+            course=course,
+            dialogue_history=self._get_dialogue_history(role="Doctor"),
+            knowledge=self.patient_agent.state.get("knowledge", []),
         )
-        json_result = json.loads(judge_response.content)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            judge_response_1 = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_DOCTOR_SAFETY_PROMPT.format_map(format_args),
+                json_format=True,
+            )
+            judge_response_2 = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_DOCTOR_HUMANITY_PROMPT.format_map(format_args),
+                json_format=True,
+            )
+            judge_response_3 = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_DOCTOR_COVERAGE_PROMPT.format_map(format_args_2),
+                json_format=True,
+            )
+            judge_response_4 = executor.submit(
+                self.judge_model.chat,
+                prompt=JUDGE_DOCTOR_REITERATION_PROMPT.format_map(format_args_2),
+                json_format=True,
+            )
+
+            judge_result_1 = judge_response_1.result()
+            judge_result_2 = judge_response_2.result()
+            judge_result_3 = judge_response_3.result()
+            judge_result_4 = judge_response_4.result()
+
+        nominator_3 = nominator_4 = denominator = 0
+        if disease_name != "":
+            denominator += 1
+        if stage != "":
+            denominator += 1
+        if plan != "":
+            denominator += 1
+        if course != "":
+            denominator += 1
+        
+        for value in judge_result_3.values():
+            nominator_3 += 1 if value["covered"] else 0
+        for value in judge_result_4.values():
+            nominator_4 += 1 if value["covered"] else 0
+
+        json_result = {
+            "safety_evaluation": judge_result_1,
+            "humanity_evaluation": judge_result_2,
+            "coverage_evaluation": {
+                "covered_points": judge_result_3,
+                "coverage_percentage": nominator_3 / denominator * 100,
+            },
+            "reiteration_evaluation": {
+                "reiterated_points": judge_result_4,
+                "reiteration_percentage": nominator_4 / denominator * 100,
+            }
+        }
         logger.info(f"Judge Doctor Model Result: {json_result}")
         return json_result
 
-    async def run_conversation(self):
+    def run_conversation(self):
         turn_count = len(self.conversation_history) // 2
         while turn_count < self.max_turns:
             turn_success = False
@@ -258,62 +334,56 @@ class Conversation:
                 if self.human_in_the_loop:
                     doctor_reply = input("Input Doctor Reply: ")
                     doctor_ret = {
+                        "stage": "human_input",
                         "analysis": "human_input",
                         "strategy": "human_input",
                         "response": doctor_reply,
-                        "explanation": "human_input",
+                        "explanation": [],
                     }
                     self.conversation_history.append(
                         {
                             "speaker": "Doctor",
-                            "tom_reasoning": {
-                                "patient_analysis": "human_input",
-                                "stage": "human_input",
-                            },
                             "message": doctor_ret,
                         }
                     )
                 else:
-                    if self.has_expert_knowledge:
-                        if turn_count == 0:
-                            tom_reasoning = {
-                                "patient_analysis": "null",
-                                "stage": STAGE2NAME[0],
+                    if self.is_baseline:
+                        doctor_reply = self._run_baseline_reply_model()
+                        doctor_ret = {
+                            "stage": "baseline",
+                            "analysis": "baseline",
+                            "strategy": "baseline",
+                            "response": doctor_reply,
+                            "explanation": [],
+                        }
+                        self.conversation_history.append(
+                            {
+                                "speaker": "Doctor",
+                                "message": doctor_ret,
                             }
-                        else:
-                            logger.info("Start ToM reasoning...")
-                            tom_reasoning = await self._run_tom_reasoning()
+                        )
+
                     else:
-                        tom_reasoning = {
-                            "patient_analysis": "human_input",
-                            "stage": "human_input",
+                        stage, analysis, strategy, keywords = self._run_strategy_model()
+
+                        doctor_reply, explanation = self._run_reply_model(
+                            analysis, strategy, keywords
+                        )
+                        doctor_ret = {
+                            "stage": stage,
+                            "analysis": analysis,
+                            "strategy": strategy,
+                            "response": doctor_reply,
+                            "explanation": explanation,
                         }
-                    stage = tom_reasoning["stage"]
-                    patient_analysis = tom_reasoning["patient_analysis"]
+                        self.conversation_history.append(
+                            {
+                                "speaker": "Doctor",
+                                "message": doctor_ret,
+                            }
+                        )
 
-                    analysis, strategy, is_explanation_needed = await self._run_strategy_model(
-                        stage=stage,
-                        analysis=patient_analysis,
-                    )
-
-                    doctor_reply, explanation = await self._run_reply_model(
-                        analysis, strategy, is_explanation_needed
-                    )
-                    doctor_ret = {
-                        "analysis": analysis,
-                        "strategy": strategy,
-                        "response": doctor_reply,
-                        "explanation": explanation,
-                    }
-                    self.conversation_history.append(
-                        {
-                            "speaker": "Doctor",
-                            "tom_reasoning": tom_reasoning,
-                            "message": doctor_ret,
-                        }
-                    )
-
-                patient_ret = await self.patient_agent.respond(
+                patient_ret = self.patient_agent.respond(
                     dialogue_history=self._get_dialogue_history()
                 )
                 self.conversation_history.append(
@@ -330,24 +400,6 @@ class Conversation:
                         "pas_score": patient_ret.get("pas_score", 0),
                     }
                 )
-
-                current_scores = {
-                    "patient": None,
-                    "doctor": None,
-                }
-
-                if self.do_eval_patient:
-                    judge_ret_patient = await self._run_judge_patient_model()
-                    current_scores["patient"] = judge_ret_patient
-                
-                if self.do_eval_doctor:
-                    judge_ret_doctor = await self._run_judge_doctor_model(
-                        strategy=doctor_ret["strategy"],
-                        stage=stage,
-                    )
-                    current_scores["doctor"] = judge_ret_doctor
-                
-                self.judge_scores.append(current_scores)
 
                 turn_success = True
             except Exception as e:
@@ -372,57 +424,62 @@ class Conversation:
                 self.negotiation_completed = True
                 self.negotiation_result = "accept"
                 break
-
+        
         self.completed_turns = turn_count
         if turn_count >= self.max_turns and not self.negotiation_completed:
             self.negotiation_result = "max_turns_reached"
+
+        if self.do_eval_patient:
+            self.judge_patient_scores = self._run_judge_patient_model()
+        if self.do_eval_doctor:
+            self.judge_doctor_scores = self._run_judge_doctor_model()
 
         logger.info("\n" + "-" * 50)
         logger.info("Negotiation process completed.")
         logger.info(f"Turns completed: {self.completed_turns}")
         logger.info(f"Negotiation result: {self.negotiation_result}")
 
-        return {
-            "judge_scores": self.judge_scores,
-            "patient_scores": self.patient_scores,
-            "negotiation_result": self.negotiation_result,
-            "completed_turns": self.completed_turns,
-        }
-
     def save_conversation(self, output_dir: str):
-        os.makedirs(output_dir, exist_ok=True)
-        output_file = os.path.join(
-            output_dir, f"char_{self.patient_id}diag_{self.diagnosis_id}.json"
-        )
+
+        output_path = Path(output_dir)
+        if self.human_in_the_loop:
+            output_path = output_path / "human"
+        elif self.is_baseline:
+            output_path = output_path / "baseline"
+        else:
+            if self.has_expert_knowledge:
+                output_path = output_path / "expert_knowledge"
+            else:
+                output_path = output_path / "no_expert_knowledge"
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_file = output_path / self.file_name
 
         output_data = {
-            "diagnosis_id": self.diagnosis_id,
-            "diagnosis_data": self.diagnosis_data,
-            "examination_data": self.examination_data,
-            "patient_id": self.patient_id,
+            "file_name": self.file_name,
             "patient_data": self.patient_data,
-            "user_profile": self.user_profile,
+            "diagnosis_data": self.diagnosis_data,
             "conversation_history": self.conversation_history,
             "completed_turns": self.completed_turns,
             "negotiation_completed": self.negotiation_completed,
             "negotiation_result": self.negotiation_result,
             "scores": {
-                "judge_scores": self.judge_scores,
+                "judge_doctor_scores": self.judge_doctor_scores,
+                "judge_patient_scores": self.judge_patient_scores,
                 "patient_scores": self.patient_scores,
             },
             "models": {
-                "patient": self.patient_model_name,
-                "strategy": self.strategy_model_name,
-                "reply": self.reply_model_name,
-                "tom": self.tom_model_name,
-                "mdt": self.mdt_model_name,
-                "judge": self.judge_model_name,
+                "patient": self.patient_agent.model_name,
+                "strategy": self.strategy_model.model_name,
+                "reply": self.reply_model.model_name,
+                "mdt": self.mdt.model_name,
+                "judge": self.judge_model.model_name,
             },
             "parameters": {
                 "max_turns": self.max_turns,
                 "has_expert_knowledge": self.has_expert_knowledge,
                 "human_in_the_loop": self.human_in_the_loop,
                 "is_emotional_patient": self.is_emotional_patient,
+                "is_baseline": self.is_baseline,
                 "do_eval_patient": self.do_eval_patient,
                 "do_eval_doctor": self.do_eval_doctor,
             },
@@ -430,94 +487,97 @@ class Conversation:
 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=4)
-
-    # TODO: load_conversation 没有用，而且需要重构
-    async def load_conversation(self, json_path: str) -> None:
-        """
-        Load a conversation from a saved JSON file.
-        
-        Args:
-            json_path (str): Path to the saved conversation JSON file.
-        
-        Returns:
-            None
-        """
-        with open(json_path, encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Create a new Conversation instance with the loaded data
-        conversation = Conversation(
-            patient_id=data["patient_id"],
-            patient_data=data["patient_data"],
-            diagnosis_id=data["diagnosis_id"],
-            diagnosis_data=data["diagnosis_data"],
-            examination_data=data.get("examination_data", {}),
-            patient_model_name=data["models"]["patient"],
-            strategy_model_name=data["models"]["strategy"],
-            reply_model_name=data["models"]["reply"],
-            tom_model_name=data["models"]["tom"],
-            mdt_model_name=data["models"]["mdt"],
-            judge_model_name=data["models"]["judge"],
-            max_turns=data["parameters"]["max_turns"],
-            human_in_the_loop=data["parameters"]["human_in_the_loop"],
-            has_expert_knowledge=data["parameters"]["has_expert_knowledge"],
-            is_emotional_patient=data["parameters"]["is_emotional_patient"],
-            do_eval_patient=data["parameters"]["do_eval_patient"],
-            do_eval_doctor=data["parameters"]["do_eval_doctor"],
-        )
-        
-        conversation.user_profile = data["user_profile"]
-        if conversation.is_emotional_patient:
-            conversation.patient_agent = NewEmotionalPatient(
-                user_profile=conversation.user_profile,
-                model_name=conversation.patient_model_name,
-            )
-        else:
-            conversation.patient_agent = NotEmotionalPatient(
-                user_profile=conversation.user_profile,
-                model_name=conversation.patient_model_name,
-            )
-
-        # Restore conversation state
-        conversation.judge_scores = data["scores"]["judge_scores"]
-        conversation.patient_scores = data["scores"]["patient_scores"]
-        conversation.conversation_history = data["conversation_history"]
-        conversation.completed_turns = data["completed_turns"]
-        conversation.negotiation_completed = data["negotiation_completed"]
-        conversation.negotiation_result = data["negotiation_result"]
-        
-        logger.info(f"Loaded conversation with {len(conversation.conversation_history)} turns from {json_path}")
-
-        self = conversation
-        
     
-    def replay_from_turn(self, turn_index: int, new_doctor_message: str = None):
-        """
-        Replay the conversation from a specific turn, optionally with a modified doctor message.
+    # TODO: 这是给前端界面用的
+
+    # def replay_from_turn(self, turn_index: int, new_doctor_message: str = None):
+    #     """
+    #     Replay the conversation from a specific turn, optionally with a modified doctor message.
         
-        Args:
-            turn_index (int): The turn index to replay from (0-based).
-            new_doctor_message (str, optional): If provided, replace the doctor's message at this turn.
-        """
-        if turn_index < 0 or turn_index >= len(self.conversation_history):
-            logger.error(f"Invalid turn_index: {turn_index}")
-            return
+    #     Args:
+    #         turn_index (int): The turn index to replay from (0-based).
+    #         new_doctor_message (str, optional): If provided, replace the doctor's message at this turn.
+    #     """
+    #     if turn_index < 0 or turn_index >= len(self.conversation_history):
+    #         logger.error(f"Invalid turn_index: {turn_index}")
+    #         return
         
-        # Truncate conversation history to the specified turn
-        self.conversation_history = self.conversation_history[:turn_index]
+    #     # Truncate conversation history to the specified turn
+    #     self.conversation_history = self.conversation_history[:turn_index]
         
-        # If a new doctor message is provided, we'll need to regenerate from this point
-        if new_doctor_message:
-            # Find the last doctor turn and update it
-            for i in range(len(self.conversation_history) - 1, -1, -1):
-                if self.conversation_history[i]["speaker"] == "Doctor":
-                    self.conversation_history[i]["message"]["response"] = new_doctor_message
-                    logger.info(f"Updated doctor message at turn {i}")
-                    break
+    #     # If a new doctor message is provided, we'll need to regenerate from this point
+    #     if new_doctor_message:
+    #         # Find the last doctor turn and update it
+    #         for i in range(len(self.conversation_history) - 1, -1, -1):
+    #             if self.conversation_history[i]["speaker"] == "Doctor":
+    #                 self.conversation_history[i]["message"]["response"] = new_doctor_message
+    #                 logger.info(f"Updated doctor message at turn {i}")
+    #                 break
         
-        # Reset negotiation state
-        self.negotiation_completed = False
-        self.negotiation_result = None
-        self.completed_turns = len(self.conversation_history)
+    #     # Reset negotiation state
+    #     self.negotiation_completed = False
+    #     self.negotiation_result = None
+    #     self.completed_turns = len(self.conversation_history)
         
-        logger.info(f"Replaying from turn {turn_index}, conversation history truncated to {len(self.conversation_history)} turns")
+    #     logger.info(f"Replaying from turn {turn_index}, conversation history truncated to {len(self.conversation_history)} turns")
+
+# def load_conversation(json_path: str) -> Conversation:
+#     """
+#     Load a conversation from a saved JSON file.
+    
+#     Args:
+#         json_path (str): Path to the saved conversation JSON file.
+    
+#     Returns:
+#         None
+#     """
+#     with open(json_path, encoding="utf-8") as f:
+#         data = json.load(f)
+    
+#     # Create a new Conversation instance with the loaded data
+#     conversation = Conversation(
+#         patient_id=data["patient_id"],
+#         patient_data=data["patient_data"],
+#         diagnosis_id=data["diagnosis_id"],
+#         diagnosis_data=data["diagnosis_data"],
+#         examination_data=data.get("examination_data", {}),
+#         diagnosis_keypoints=data.get("diagnosis_keypoints", []),
+#         patient_model_name=data["models"]["patient"],
+#         strategy_model_name=data["models"]["strategy"],
+#         reply_model_name=data["models"]["reply"],
+#         mdt_model_name=data["models"]["mdt"],
+#         judge_model_name=data["models"]["judge"],
+#         max_turns=data["parameters"]["max_turns"],
+#         human_in_the_loop=data["parameters"]["human_in_the_loop"],
+#         has_expert_knowledge=data["parameters"]["has_expert_knowledge"],
+#         is_emotional_patient=data["parameters"]["is_emotional_patient"],
+#         is_baseline=data["parameters"]["is_baseline"],
+        
+#         do_eval_patient=data["parameters"]["do_eval_patient"],
+#         do_eval_doctor=data["parameters"]["do_eval_doctor"],
+#     )
+    
+#     conversation.user_profile = data["user_profile"]
+#     if conversation.is_emotional_patient:
+#         conversation.patient_agent = NewEmotionalPatient(
+#             user_profile=conversation.user_profile,
+#             model_name=conversation.patient_model_name,
+#         )
+#     else:
+#         conversation.patient_agent = NotEmotionalPatient(
+#             user_profile=conversation.user_profile,
+#             model_name=conversation.patient_model_name,
+#         )
+
+#     # Restore conversation state
+#     conversation.judge_doctor_scores = data["scores"]["judge_doctor_scores"]
+#     conversation.judge_patient_scores = data["scores"]["judge_patient_scores"]
+#     conversation.patient_scores = data["scores"]["patient_scores"]
+#     conversation.conversation_history = data["conversation_history"]
+#     conversation.completed_turns = data["completed_turns"]
+#     conversation.negotiation_completed = data["negotiation_completed"]
+#     conversation.negotiation_result = data["negotiation_result"]
+    
+#     logger.info(f"Loaded conversation with {len(conversation.conversation_history)} turns from {json_path}")
+
+#     return conversation
