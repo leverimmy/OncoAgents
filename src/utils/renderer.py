@@ -33,3 +33,15 @@ def render_user_profile(patient_data: dict[str, str], role: str = "Patient", wit
 -   性格特点：{personality}
 -   沟通风格：{communication_style}
 """.strip()
+
+def render_diagnosis_data(diagnosis_data: dict[str, str]) -> str:
+    disease_name = diagnosis_data["diagnosis"]["disease_name"]
+    stage = diagnosis_data["diagnosis"]["stage"]
+    plan = diagnosis_data["treatment"]["plan"]
+    course = diagnosis_data["treatment"]["course"]
+
+    return f"""
+-   疾病名称：{disease_name}
+-   分期：{stage}
+-   推荐治疗方案：{plan}
+""".strip() + f"\n-   治疗周期：{course}" if len(course) > 0 else ""
