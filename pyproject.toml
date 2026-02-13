@@ -16,7 +16,9 @@ dependencies = [
     "sentence-transformers>=5.2.0",
     "streamlit>=1.53.0",
     "tqdm>=4.67.1",
+    "transformers==4.57.1",
     "vllm>=0.13.0",
+    "wandb>=0.25.0",
 ]
 
 [dependency-groups]

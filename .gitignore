@@ -6,17 +6,12 @@
 
 # Logs
 logs/
+wandb/
 
 # Data and results
 data/
 results/
-*.log
-*.png
 
-# Python cache files
-**/__pycache__/
-
-# Other files
-___*.py
-NatureCommunications/
+# Cache files
+__pycache__/
 .ruff_cache/
