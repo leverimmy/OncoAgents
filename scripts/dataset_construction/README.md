@@ -8,8 +8,7 @@ Run the following command to generate a sample dataset of patient characteristic
 uv run python3 main.py \
     --background_dir ../../data/background \
     --diagnosis_dir ../../data/diagnosis \
-    --output_dir ../../data/test \
-    --sample_size 30 \
+    --output_dir ../../data/full \
     --seed 42 \
     --max_workers 8
 ```
@@ -18,6 +17,6 @@ Visualize the distribution of generated patient backgrounds:
 
 ```bash
 uv run python3 statistics.py \
-    --input_dir ../../data/test \
+    --input_dir ../../data/full \
     --output_dir ../../data/figs
 ```

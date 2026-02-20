@@ -10,6 +10,9 @@ from openai import OpenAI
 from reiterate_prompt import REITERATE_PROMPT
 from tqdm import tqdm
 
+NAMES = ["肺癌", "乳腺癌", "胃癌", "结直肠癌", "前列腺癌"]
+DIRS = ["experiment", "test", "train", "statistics"]
+
 client = OpenAI(
     api_key="0",
     base_url="http://localhost:8000/v1",
@@ -54,10 +57,9 @@ def reiterate_symptom(symptom: dict[str, str], education_level: str) -> str:
     ))
     return reiterate_symptom
 
-def process_one(char_id: int, diag_id: int, background_dir: Path, diagnosis_dir: Path, output_dir: Path):
-    char_file = background_dir / f"{char_id}.json"
-    diag_file = diagnosis_dir / f"{diag_id}.json"
-    output_file = output_dir / f"char{char_id}_diag{diag_id}.json"
+def process_one(char_file: Path, diag_file: Path, name: str, output_dir: Path):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f"char{char_file.stem}_diag{diag_file.stem}_{name}.json"
     with open(char_file, encoding='utf-8') as cf, open(diag_file, encoding='utf-8') as df:
         char_data = json.load(cf)
         diag_data = json.load(df)
@@ -77,8 +79,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--background_dir', type=str, default='../../data/background', help='Path to background data directory')
     parser.add_argument('--diagnosis_dir', type=str, default='../../data/diagnosis', help='Path to diagnosis data directory')
-    parser.add_argument('--output_dir', type=str, default='../../data/test', help='Path to output sample IDs file')
-    parser.add_argument('--sample_size', type=int, default=8, help='Number of samples to generate')
+    parser.add_argument('--output_dir', type=str, default='../../data/', help='Path to output sample IDs file')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for sampling')
     parser.add_argument('--max_workers', type=int, default=4, help='Maximum number of parallel workers for processing samples')
     args = parser.parse_args()
@@ -89,30 +90,25 @@ if __name__ == '__main__':
     random.seed(args.seed)
     background_dir = Path(args.background_dir)
     diagnosis_dir = Path(args.diagnosis_dir)
-    background_files = sorted(os.listdir(background_dir))
-    diagnosis_files = sorted(os.listdir(diagnosis_dir))
 
-    all_combinations = [(int(bf.split('.')[0]), int(df.split('.')[0])) for bf in background_files for df in diagnosis_files]
-    sampled_combinations = random.sample(all_combinations, args.sample_size)
-
-    sample_ids = []
-    for char_id, diag_id in sampled_combinations:
-        sample_ids.append({
-            'characteristic_id': char_id,
-            'diagnosis_id': diag_id
-        })
-    output_path = output_dir / "test.txt"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(sample_ids, f, indent=4, ensure_ascii=False)
+    char_files = list(background_dir.glob("*.json"))
     
+    futures = []
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        futures = []
-        for char_id, diag_id in sampled_combinations:
-            futures.append(executor.submit(process_one, char_id, diag_id, background_dir, diagnosis_dir, output_dir))
-        
+        for name in NAMES:
+            for dir in DIRS:
+                diag_dir = diagnosis_dir / name / dir
+                diag_files = list(diag_dir.glob("*.json"))
+                for diag_file in diag_files:
+                    char_file = random.choice(char_files)
+                    char_file2 = random.choice(char_files)
+                    while char_file2 == char_file:
+                        char_file2 = random.choice(char_files)
+                    # 每个患者病历搭配两份不同的背景资料，生成两条样本
+                    futures.append(executor.submit(process_one, char_file, diag_file, name, output_dir / dir))
+                    futures.append(executor.submit(process_one, char_file2, diag_file, name, output_dir / dir))
         for future in tqdm(as_completed(futures), total=len(futures), desc="Processing samples"):
             try:
-                result = future.result()
-                print(f"Processed sample saved to: {result}")
+                future.result()
             except Exception as e:
                 print(f"Error processing sample: {e}")
