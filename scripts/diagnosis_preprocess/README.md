@@ -6,6 +6,10 @@ Run the following command to preprocess raw patient diagnosis data:
 
 ```bash
 uv run python3 main.py \
+    --input_dir ../../data/raw/肺癌_非小细胞_1357 \
+    --output_dir ../../data/raw/肺癌_非小细胞_preprocessed \
+    --workers 16
+uv run python3 main.py \
     --input_dir ../../data/raw/乳腺癌_1326 \
     --output_dir ../../data/raw/乳腺癌_preprocessed \
     --workers 16
@@ -32,6 +36,34 @@ Run the following command to de-identify and move the dataset:
 
 ```bash
 uv run python3 de-identify.py \
+    --source_dir ../../data/raw/肺癌_非小细胞_preprocessed/success \
+    --dest_dir ../../data/diagnosis_all/肺癌
+uv run python3 de-identify.py \
     --source_dir ../../data/raw/乳腺癌_preprocessed/success \
-    --dest_dir ../../data/diagnosis/乳腺癌
+    --dest_dir ../../data/diagnosis_all/乳腺癌
+uv run python3 de-identify.py \
+    --source_dir ../../data/raw/胃癌_preprocessed/success \
+    --dest_dir ../../data/diagnosis_all/胃癌
+uv run python3 de-identify.py \
+    --source_dir ../../data/raw/前列腺癌_preprocessed/success \
+    --dest_dir ../../data/diagnosis_all/前列腺癌
+uv run python3 de-identify.py \
+    --source_dir ../../data/raw/结直肠癌_preprocessed/success \
+    --dest_dir ../../data/diagnosis_all/结直肠癌
+```
+
+Run the following command to duplicate dataset:
+
+```bash
+uv run python3 duplicate.py \
+    --source_dir ../../data/diagnosis_all/前列腺癌3_base \
+    --dest_dir ../../data/diagnosis_all/前列腺癌3 \
+    --start_id 79 \
+    --num_duplicates 120
+
+uv run python3 duplicate.py \
+    --source_dir ../../data/diagnosis_all/前列腺癌4_base \
+    --dest_dir ../../data/diagnosis_all/前列腺癌4 \
+    --start_id 199 \
+    --num_duplicates 315
 ```
