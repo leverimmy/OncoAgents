@@ -16,6 +16,13 @@ class NewEmotionalPatient:
         self.model_name = model_name
         self.model = LanguageModel(model_name=model_name, url=url)
 
+        self.keypoints = {
+            "disease_name": [],
+            "stage": [],
+            "plan": [],
+            "course": [],
+        }
+
         self.state = {
             "knowledge": [],
             "information_gap": [],
@@ -89,6 +96,10 @@ class NewEmotionalPatient:
             prompt=REFINE_PROMPT.format_map(format_args),
             json_format=True,
         )
+
+        for key in self.keypoints.keys():
+            if len(refine_cot.get(key, "")) > 0 and refine_cot.get(key, "空") != "空" and refine_cot[key] not in self.keypoints[key]:
+                self.keypoints[key].append(refine_cot[key])
         # TODO: 这里可能会出现解析错误，增加异常处理
         logger.info(f"Refine CoT Result: {refine_cot}")
         return refine_cot

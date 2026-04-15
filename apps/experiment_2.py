@@ -1,431 +1,513 @@
 import json
 import os
+import random
 import sys
 from pathlib import Path
 
 import streamlit as st
+from streamlit_sortables import sort_items
 
-# Add current directory to path so we can import src
 sys.path.append(os.path.abspath("../"))
 
 from src.conversation import Conversation
-from src.utils import render_diagnosis_data, render_personal_info, render_user_profile
+from src.utils import (
+    render_diagnosis_data,
+    render_personal_info,
+    render_user_profile,
+)
 
-# Page Config
 st.set_page_config(layout="wide", page_title="OncoAgents 对话")
 
-# --- Constants & Helpers --- #
-DATA_DIR = "../data/pretest"
-
-MAP = [
-    "char95_diag313.json",
-    "char120_diag73.json",
-    "char161_diag98.json",
-    "char215_diag320.json",
-    "char244_diag318.json",
-    "char256_diag581.json",
-    "char259_diag416.json",
-    "char428_diag587.json",
+SRC = "../scripts/experiments/data"
+DIRS = [
+    "test_qwen3-8b/cot",       # A
+    "test_gpt-5-chat/cot",     # B
+    "test_o3/cot",             # C
+    "test_qwen3-8b/warm",      # D
+    "test_qwen3-8b-dpo/warm",  # E
 ]
 
-def generate_doctor_step(conversation: Conversation):
-    """Runs one step of doctor generation."""
-    try:
-        if conversation.is_baseline:
-             doctor_reply = conversation._run_baseline_reply_model()
-             doctor_ret = {
-                 "stage": "baseline",
-                 "analysis": "baseline",
-                 "strategy": "baseline",
-                 "response": doctor_reply,
-                 "explanation": [],
-             }
-        else:
-            stage, analysis, strategy, keywords = conversation._run_strategy_model()
-            doctor_reply, explanation = conversation._run_reply_model(
-                stage, analysis, strategy, keywords
+LABELS = ["A", "B", "C", "D", "E"]
+
+DIMENSIONS = [
+"""
+### 诊疗过程信息可理解性
+
+请判断：哪一位 **医生智能体** 更能**以符合该患者理解能力的方式传递医学信息**，帮助患者听懂当前病情、理解下一步安排。您可以从以下角度综合判断：
+-   对患者表达是否清晰，是否符合患者受教育水平
+-   是否避免过多未解释的专业术语
+-   对关键医学信息是否解释到位，而不是只罗列结论
+-   患者是否有可能在听完后理解“自己得了什么病、问题大概是什么、下一步要做什么”
+-   表达是否条理清楚，是否有助于患者继续进入后续诊疗流程
+
+**请按照从高到低的顺序，从上到下排序这五位医生智能体在诊疗过程信息可理解性维度上的表现。**
+""", """
+### 诊疗过程问答合理性
+
+请判断：哪一位 **医生智能体** 在诊疗问答中更**符合规范和安全的临床沟通要求**。您可以从以下角度综合判断：
+-   医学信息是否基本准确，是否存在明显事实错误
+-   是否与已知诊断信息和临床背景一致
+-   是否存在不当引导、过度确定性表达或不恰当保证
+-   是否对治疗风险、副作用、不确定性和后续确认需要有基本提示
+-   是否覆盖了当前阶段对患者具有临床意义的关键信息
+-   问答过程是否符合真实诊疗逻辑，而不是机械、失真或明显脱离临床场景
+
+**请按照从高到低的顺序，从上到下排序这五位医生智能体在诊疗过程问答合理性维度上的表现。**
+""", """
+### 诊疗过程人文关怀度
+
+请判断：哪一位 **医生智能体** 在沟通过程中更能**体现对患者的尊重、共情和支持**，并更贴合患者的情绪与沟通需求。您可以从以下角度综合判断：
+-   是否尊重患者处境和顾虑，避免冷漠、指责或居高临下
+-   是否对患者情绪有恰当回应，例如对焦虑、害怕、反复提问等表现出理解和安抚
+-   是否鼓励患者表达疑问，愿意耐心解释
+-   是否支持患者参与决策，而不是强迫、施压或替患者武断决定
+-   整体沟通是否自然、拟真，是否让患者更容易建立信任并进入后续诊疗流程
+
+**请按照从高到低的顺序，从上到下排序这五位医生智能体在诊疗过程人文关怀度维度上的表现。**
+"""]
+
+if "page_idx" not in st.session_state:
+    st.session_state.page_idx = 0
+
+if "initialized" not in st.session_state:
+    st.session_state.initialized = False
+
+
+def get_name(input_file: str) -> str:
+    input_file = input_file.split(SRC)[-1].strip("/")
+    names = input_file.split("/")[:2]
+    return "_".join(names)
+
+
+def load_conversation(input_file: Path) -> Conversation:
+    data = json.load(open(input_file, encoding="utf-8"))
+    return Conversation(
+        file_name=data.get("file_name", "uploaded_conversation"),
+        patient_data=data.get("patient_data", {}),
+        examination_data=data.get("examination_data", {}),
+        patient_model_name=data.get("models", {}).get("patient", ""),
+        strategy_model_name=data.get("models", {}).get("strategy", ""),
+        reply_model_name=data.get("models", {}).get("reply", ""),
+        mdt_model_name=data.get("models", {}).get("mdt", ""),
+        judge_model_name=data.get("models", {}).get("judge", ""),
+        url=data.get("models", {}).get("url", None),
+        max_turns=data.get("parameters", {}).get("max_turns", 15),
+        human_in_the_loop=data.get("parameters", {}).get("human_in_the_loop", False),
+        has_expert_knowledge=data.get("parameters", {}).get("has_expert_knowledge", False),
+        is_emotional_patient=data.get("parameters", {}).get("is_emotional_patient", False),
+        is_baseline=data.get("parameters", {}).get("is_baseline", False),
+        do_eval_patient=data.get("parameters", {}).get("do_eval_patient", False),
+        do_eval_doctor=data.get("parameters", {}).get("do_eval_doctor", False),
+        conversation_history=data.get("conversation_history", []),
+    )
+
+def build_label_mapping(name: int, file_name: str):
+    """
+    给当前评测样本生成一个稳定的随机双射：
+    A/B/C/D/E  ->  DIRS 中的真实目录
+    """
+    case_key = f"{name}::{file_name}"
+
+    if st.session_state.get("mapping_case_key") == case_key:
+        return
+
+    rng = random.Random(case_key)   # 稳定随机：同一个人 + 同一个病例，顺序固定
+    shuffled_dirs = DIRS.copy()
+    rng.shuffle(shuffled_dirs)
+
+    label_to_dir = dict(zip(LABELS, shuffled_dirs))
+    dir_to_label = {v: k for k, v in label_to_dir.items()}
+
+    conversations_by_label = {}
+    input_files_by_label = {}
+    model_map = {}         # 保存时用：label -> 真实 DIR 字符串
+    model_name_map = {}    # 备用：label -> get_name(...) 结果
+
+    for label in LABELS:
+        real_dir = label_to_dir[label]
+        input_file = Path(SRC) / real_dir / file_name
+
+        input_files_by_label[label] = input_file
+        conversations_by_label[label] = load_conversation(input_file)
+        model_map[label] = real_dir
+        model_name_map[label] = get_name(str(input_file))
+
+    st.session_state.mapping_case_key = case_key
+    st.session_state.label_to_dir = label_to_dir
+    st.session_state.dir_to_label = dir_to_label
+    st.session_state.input_files_by_label = input_files_by_label
+    st.session_state.conversations_by_label = conversations_by_label
+    st.session_state.model_map = model_map
+    st.session_state.model_name_map = model_name_map
+
+SORTABLE_CSS = """
+.sortable-component {
+    padding: 0.2rem 0 0.8rem 0;
+}
+
+.sortable-container {
+    background: transparent;
+}
+
+.sortable-item, .sortable-item:hover {
+color: #111827 !important;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.2;
+    min-height: 78px;
+    padding: 18px 22px;
+    margin: 10px 0;
+    border-radius: 14px;
+    border: 1px solid #d0d7de;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+}
+
+.sortable-item {
+    cursor: grab;
+}
+"""
+
+def parse_rank_text(raw: str):
+    raw = raw.upper().replace(" ", "").replace(">", "").replace(",", "")
+    chars = [ch for ch in raw if ch in LABELS]
+    if len(chars) != len(LABELS):
+        return None
+    if set(chars) != set(LABELS):
+        return None
+    return chars
+
+def on_rank_text_change(dim_id: str):
+    order_key = f"rank_order_{dim_id}"
+    text_key = f"rank_text_{dim_id}"
+    error_key = f"rank_error_{dim_id}"
+    drag_version_key = f"rank_drag_version_{dim_id}"
+
+    parsed = parse_rank_text(st.session_state[text_key])
+    if parsed is None:
+        st.session_state[error_key] = "请输入 5 个不重复字母，例如 BACED"
+        return
+
+    st.session_state[order_key] = parsed
+    st.session_state[text_key] = "".join(parsed)
+    st.session_state[error_key] = ""
+
+    # 强制重建上面的拖拽组件
+    if drag_version_key not in st.session_state:
+        st.session_state[drag_version_key] = 0
+    st.session_state[drag_version_key] += 1
+
+def render_rank_editor(title_md: str, dim_id: str):
+    order_key = f"rank_order_{dim_id}"
+    text_key = f"rank_text_{dim_id}"
+    error_key = f"rank_error_{dim_id}"
+    drag_version_key = f"rank_drag_version_{dim_id}"
+
+    if order_key not in st.session_state:
+        st.session_state[order_key] = LABELS.copy()
+    if text_key not in st.session_state:
+        st.session_state[text_key] = "".join(st.session_state[order_key])
+    if error_key not in st.session_state:
+        st.session_state[error_key] = ""
+    if drag_version_key not in st.session_state:
+        st.session_state[drag_version_key] = 0
+
+    drag_key = f"rank_drag_{dim_id}_{st.session_state[drag_version_key]}"
+
+    st.markdown(title_md.strip())
+
+    dragged_order = sort_items(
+        st.session_state[order_key],
+        key=drag_key,
+        custom_style=SORTABLE_CSS,
+    )
+
+    if dragged_order != st.session_state[order_key]:
+        st.session_state[order_key] = dragged_order
+        st.session_state[text_key] = "".join(dragged_order)
+        st.session_state[error_key] = ""
+
+    st.text_input(
+        "也可以直接输入排序（高 → 低）",
+        key=text_key,
+        placeholder="例如：BACED",
+        help="按从高到低输入，例如 BACED",
+        on_change=on_rank_text_change,
+        args=(dim_id,),
+    )
+
+    if st.session_state[error_key]:
+        st.warning(st.session_state[error_key])
+
+    return st.session_state[order_key]
+
+def render_turn(turn):
+    speaker = turn["speaker"]
+    msg = turn.get("message", {})
+    response_text = msg.get("response", "")
+
+    if speaker == "Doctor":
+        with st.chat_message("user", avatar="👨‍⚕️"):
+            st.markdown(
+                f"<div class='doctor-green'><p class='turn-text'>{response_text}</p></div>",
+                unsafe_allow_html=True,
             )
-            doctor_ret = {
-                "stage": stage,
-                "analysis": analysis,
-                "strategy": strategy,
-                "keywords": keywords,
-                "response": doctor_reply,
-                "explanation": explanation,
-            }
-
-        term = {
-            "speaker": "Doctor",
-            "message": doctor_ret,
-        }
-        return term
-    except Exception as e:
-        st.error(f"Error in doctor step: {e}")
-        raise e
-
-def generate_patient_step(conversation: Conversation):
-    """Runs one step of patient generation."""
-    try:
-        patient_ret = conversation.patient_agent.respond(
-            dialogue_history=conversation._get_dialogue_history()
+    elif speaker == "Patient":
+        st.markdown(
+            f"""
+            <div class="chat-row patient">
+                <div class="chat-avatar">🧑‍🦲</div>
+                <div class="chat-bubble patient-white">
+                    <p class="turn-text">{response_text}</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        
-        term = {
-            "speaker": "Patient",
-            "message": patient_ret,
-        }
-        
-        # Update scores like in run_conversation
-        conversation.patient_scores.append({
-            "ccs_score": patient_ret.get("ccs_score", 0),
-            "ess_score": patient_ret.get("ess_score", 0),
-            "pas_score": patient_ret.get("pas_score", 0),
-        })
-        
-        return term
-    except Exception as e:
-        st.error(f"Error in patient step: {e}")
-        raise e
 
-# --- Main App Logic --- #
+
+st.markdown("""
+<style>
+div[data-testid="stChatMessage"] {
+    background-color: transparent !important;
+}
+.doctor-green {
+  background: #d4edda;
+  border: 1px solid #b7e1c1;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+}
+.patient-white {
+  border: 1px solid;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+}
+.patient-red {
+  border: 1px solid #f4c7c3;
+  background: #fce8e6;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+}
+.turn-text {
+  font-size: 20px;
+  margin: 0;
+}
+.chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+}
+.chat-row.doctor {
+  flex-direction: row-reverse;
+}
+.chat-avatar {
+  font-size: 28px;
+  line-height: 1;
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+.chat-bubble {
+  max-width: 85%;
+}
+div[data-testid="stComponent"] iframe {
+  min-height: 420px !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("OncoAgents 交互界面")
 
-# Sidebar
-with st.sidebar:
-    st.header("配置")
+if 'name' not in st.session_state:
+    st.session_state.name = None
 
-    selected = st.number_input("选择对话 (1-8)", min_value=1, max_value=8, value=1)
-    input_file = Path(DATA_DIR) / MAP[selected - 1]
-    st.session_state.conversation_data = json.load(open(input_file, encoding="utf-8"))
-    st.success(f"已加载对话文件: {input_file.name}")
-    # uploaded_file = st.file_uploader("上传对话 JSON", type=["json"])
-    # if uploaded_file:
-    #     try:
-    #         st.session_state.conversation_data = json.load(uploaded_file)
-    #         st.success("已加载 JSON.")
-    #     except Exception as e:
-    #         st.error(f"无效的 JSON: {e}")
+if st.button("点击此按钮开始！"):
+    st.session_state.page_idx = 0
+    # 怎么保证按一下 button，name += 1 呢？分布式访问也需要成立。
+    # 查看 result/exp2/ 下的文件夹名称，range(1, 31) 里的哪个数字没有了，就用哪个数字
+    found = [False for _ in range(31)]
+    for dir in Path("result/exp2").iterdir():
+        if dir.is_dir():
+            try:
+                num = int(dir.name)
+                found[num] = True
+            except ValueError:
+                continue
+    flag = True
+    for i in range(1, 31):
+        if not found[i]:
+            st.session_state.name = i
+            # 新建文件夹 result/exp2/{i}，以占位，防止重复
+            (Path("result/exp2") / str(i)).mkdir(parents=True, exist_ok=True)
+            flag = False
+            break
+    if st.session_state.name is None or flag:
+        # 在 found 的基础上选一个文件夹里还没有文件的
+        for i in range(1, 31):
+            if found[i]:
+                dir_path = Path("result/exp2") / str(i)
+                if not any(dir_path.iterdir()):
+                    st.session_state.name = i
+                    break
+    # 如果实在满了，就提示并退出
+    is_exit = True
+    for i in range(1, 31):
+        dir_path = Path("result/exp2") / str(i)
+        if any(dir_path.iterdir()):
+            is_exit = False
+            break
+    if is_exit:
+        st.error("当前评测系统已满，请稍后再试！")
+        st.stop()
+    print(st.session_state.name)
+    files = sorted(Path(f"{SRC}/test_gpt-5-chat/cot").glob("*.json"))
+    st.session_state.file_name = files[(st.session_state.name - 1) % 10].name
 
-    # Settings
-    st.markdown("---")
-    st.subheader("模型设置")
+    build_label_mapping(st.session_state.name, st.session_state.file_name)
+    st.session_state.initialized = True
+    st.rerun()
 
-    if "conversation_data" in st.session_state and st.session_state.conversation_data.get("models"):
-        models = st.session_state.conversation_data["models"]
-        patient_model_name = st.text_input("患者模型名称", value=models["patient"], disabled=True)
-        strategy_model_name = st.text_input("策略模型名称", value=models["strategy"], disabled=True)
-        reply_model_name = st.text_input("回复模型名称", value=models["reply"], disabled=True)
-        mdt_model_name = st.text_input("MDT 模型名称", value=models["mdt"], disabled=True)
-        judge_model_name = st.text_input("Judge 模型名称", value=models["judge"], disabled=True)
-        url = st.text_input("URL (如果需要)", value=models.get("url", "http://localhost:8000/v1/"), disabled=True)
-    else:
-        patient_model_name = st.text_input("患者模型名称", value="o3")
-        strategy_model_name = st.text_input("策略模型名称", value="Qwen/Qwen3-8B")
-        reply_model_name = st.text_input("回复模型名称", value="Qwen/Qwen3-8B")
-        mdt_model_name = st.text_input("MDT 模型名称", value="Qwen/Qwen3-8B")
-        judge_model_name = st.text_input("Judge 模型名称", value="o3")
-        url = st.text_input("URL (如果需要)", value="http://localhost:8000/v1/")
-
-    st.markdown("---")
-    st.subheader("参数设置")
-
-    if "conversation_data" in st.session_state and st.session_state.conversation_data.get("parameters"):
-        params = st.session_state.conversation_data["parameters"]
-        max_turns = st.number_input("最长对话轮数", value=params.get("max_turns", 15), min_value=1, disabled=True)
-        human_in_the_loop = st.checkbox("人类作为医生进行对话", value=params.get("human_in_the_loop", False), disabled=True, help="人类对话，用文本输入框的形式和患者智能体进行交流")
-        has_expert_knowledge = st.checkbox("具备专家知识？", value=params.get("has_expert_knowledge", True), disabled=True)
-        debug_mode = st.checkbox("单步调试", value=False, disabled=True)
-        is_emotional_patient = st.checkbox("使用具有情感的患者智能体", value=params.get("is_emotional_patient", True), disabled=True)
-        is_baseline = st.checkbox("Baseline 模式", value=params.get("is_baseline", False), disabled=True)
-        do_eval_patient = st.checkbox("进行患者评估", value=params.get("do_eval_patient", False), disabled=True)
-        do_eval_doctor = st.checkbox("进行医生评估", value=params.get("do_eval_doctor", False), disabled=True)
-    else:
-        is_emotional_patient = st.checkbox("是否使用具有情感的患者智能体", value=True)
-        human_in_the_loop = st.checkbox("是否人类作为医生进行对话", value=True, help="人类对话，用文本输入框的形式和患者智能体进行交流")
-        is_baseline = st.checkbox("是否为 Baseline 模式", value=False)
-        has_expert_knowledge = st.checkbox("是否具备专家知识？", value=True)
-        debug_mode = st.checkbox("单步调试", value=False)
-        max_turns = st.number_input("最长对话轮数", value=15, min_value=1)
-        # do_eval_patient = st.checkbox("是否进行患者评估", value=False)
-        # do_eval_doctor = st.checkbox("是否进行医生评估", value=False)
-        do_eval_patient = False
-        do_eval_doctor = False
-    
-    if st.button("初始化 / 重置会话"):
-        if "conversation_data" in st.session_state:
-            data = st.session_state.conversation_data
-            if "patient_data" not in data or "examination_data" not in data:
-                patient_data = {
-                    "personal_info": data["personal_info"],
-                    "symptom": data["symptom"],
-                    "reiterated_symptom": data["reiterated_symptom"],
-                }
-                examination_data = {
-                    "symptom": data["symptom"],
-                    "auxiliary_examination": data["auxiliary_examination"],
-                    "diagnosis": data["diagnosis"],
-                    "treatment": data["treatment"],
-                }
-                data = {
-                    "file_name": data.get("file_name", "uploaded_conversation"),
-                    "patient_data": patient_data,
-                    "examination_data": examination_data,
-                }
-            st.session_state.conversation = Conversation(
-                file_name=data.get("file_name", "uploaded_conversation"),
-                patient_data=data.get("patient_data", {}),
-                examination_data=data.get("examination_data", {}),
-                patient_model_name=patient_model_name,
-                strategy_model_name=strategy_model_name,
-                reply_model_name=reply_model_name,
-                mdt_model_name=mdt_model_name,
-                judge_model_name=judge_model_name,
-                url=url,
-                max_turns=max_turns,
-                human_in_the_loop=human_in_the_loop,
-                has_expert_knowledge=has_expert_knowledge,
-                is_emotional_patient=is_emotional_patient,
-                is_baseline=is_baseline,
-                do_eval_patient=do_eval_patient,
-                do_eval_doctor=do_eval_doctor,
-            )
-            st.session_state.initialized = True
-            st.success("会话已初始化.")
-            st.rerun()
-
-# --- Conversation View --- #
 
 if "initialized" in st.session_state and st.session_state.initialized:
-    conversation = st.session_state.conversation
-    
-    st.subheader(f"对话 (文件: {conversation.file_name})")
+    st.success("数据加载成功！")
+    conversations_by_label = st.session_state.conversations_by_label
+    page_labels = LABELS + ["评分页"]
 
-    # Layout: Chat (Left) + Data (Right)
-    col_chat, col_data = st.columns([2, 1])
+    col_chat, col_data = st.columns([3, 2])
 
-    # Right Column: Data
     with col_data:
+        current_label = LABELS[min(st.session_state.page_idx, 4)]
+        current_conv = conversations_by_label[current_label]
         st.markdown("### 数据面板")
-        with st.container(height=250):
-            with st.expander("患者数据 (Patient Data)", expanded=True):
-                st.write(render_user_profile(conversation.patient_data, "Patient"))
-        with st.container(height=650):
-            with st.expander("患者信息 (Personal Information)", expanded=True):
-                st.write(render_personal_info(conversation.patient_data))
-            with st.expander("诊断数据 (Diagnosis Data)", expanded=True):
-                st.write(render_diagnosis_data(conversation.examination_data, with_exams=True))
+        with st.expander("患者数据 (Patient Data)", expanded=True):
+            st.write(render_user_profile(current_conv.patient_data, "Patient"))
+        with st.expander("患者信息 (Personal Information)", expanded=True):
+            st.write(render_personal_info(current_conv.patient_data))
+        with st.expander("诊断数据 (Diagnosis Data)", expanded=True):
+            st.write(render_diagnosis_data(current_conv.examination_data, with_exams=True))
 
-    # Left Column: Chat & Controls
     with col_chat:
-        history = conversation.conversation_history
-        
-        # Display History
-        for i, turn in enumerate(history):
-            speaker = turn["speaker"]
-            
-            if speaker == "Doctor":
-                # Doctor Message (Right)
-                d_c1, d_c2 = st.columns([1, 4])
-                with d_c2:
-                    with st.chat_message("assistant", avatar="👨‍⚕️"):
-                        msg = turn.get("message", {})
-                        response_text = msg.get("response", "")
-                        
-                        st.markdown(f"<div style='font-size:20px;'>{response_text}</div>", unsafe_allow_html=True)
-                        
-                        # Expandable details
-                        with st.expander("内部状态 (策略 & 解释)", expanded=False):
-                            st.write("- **阶段:**", msg.get("stage", "N/A"))
-                            st.write("- **分析:**", msg.get("analysis", "N/A"))
-                            st.write("- **策略:**", msg.get("strategy", "N/A"))
-                            st.write("- **关键词:**", msg.get("keywords", []))
-                            
-                            if msg.get("explanation"):
-                                st.markdown("##### 解释结果:")
-                                explanation = msg.get("explanation")
-                                if isinstance(explanation, list):
-                                    for item in explanation:
-                                        q = item.get("query", "")
-                                        e = item.get("explanation", "")
-                                        st.markdown(f"- **Query**: {q}")
-                                        st.markdown(f"> {e}")
-                                else:
-                                    st.write(explanation)
+        st.subheader("场景背景")
+        st.markdown("""
+假设你是一位肿瘤医生。某位患者已入院并完成必要检查。现在你需要与患者进行一次关键沟通：**告知癌症诊断结果，并解释推荐的治疗方案与下一步安排**。为保证沟通过程可重复、可评估，我们参考 SPIKES 坏消息告知框架（Baile 等提出的经典六步法）并进行简化。
 
-                        # # Logic for "Edit & Replay"
-                        # if st.button("编辑并重播", key=f"edit_btn_{i}"):
-                        #     st.session_state.editing_index = i
-                        #     st.rerun()
-
-            elif speaker == "Patient":
-                # Patient Message (Left)
-                p_c1, p_c2 = st.columns([4, 1])
-                with p_c1:
-                    with st.chat_message("user", avatar="👤"):
-                        msg = turn.get("message", {})
-                        response_text = msg.get("response", "")
-                        st.markdown(f"<div style='font-size:20px;'>{response_text}</div>", unsafe_allow_html=True)
-                        
-                        # Internal State (Patient)
-                        with st.expander("内部状态 (CoT & 评估)", expanded=False):
-                            st.markdown("## 情感 CoT")
-                            st.write(f"- **分析**: {msg.get('emotion_analysis', 'N/A')}")
-                            st.write(f"- **状态**: {msg.get('emotion_state', 'N/A')}")
-                            st.write(f"- **信任分析**: {msg.get('trust_analysis', 'N/A')}")
-                            st.write(f"- **信任状态**: {msg.get('trust_state', 'N/A')}")
-
-                            st.markdown("## 理性 CoT")
-                            st.write(f"- **输入分析**: {msg.get('input_analysis', 'N/A')}")
-                            st.write(f"- **知识**: {msg.get('knowledge', 'N/A')}")
-                            st.write(f"- **信息差距**: {msg.get('information_gap', 'N/A')}")
-
-                        # Scores
-                        with st.expander("## 评分", expanded=False):
-                            st.write(f"- **CCS**: {msg.get('ccs_score', 'N/A')}")
-                            st.write(f"- **ESS**: {msg.get('ess_score', 'N/A')}")
-                            st.write(f"- **PAS 分析**: {msg.get('pas_analysis', 'N/A')}")
-                            st.write(f"- **PAS**: {msg.get('pas_score', 'N/A')}")
-                            st.write(f"- **决策**: {msg.get('decision', 'N/A')}")
-
-        # --- Editing Area (if active) --- #
-        if "editing_index" in st.session_state:
-            idx = st.session_state.editing_index
-            if 0 <= idx < len(history):
-                turn_to_edit = history[idx]
-                current_text = turn_to_edit["message"].get("response", "")
+SPIKES 是“告知重大坏消息”的一种策略。我们将 SPIKES 中的六个阶段化简为以下四个，你可以将对话组织为以下四个阶段（顺序建议，但可根据患者反应灵活调整）：
                 
-                st.info("正在编辑医生消息。这将移除后续的所有回复并重新生成患者的回复。")
-                new_text = st.text_area("医生消息", value=current_text)
-                
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    if st.button("确认并重播"):
-                        conversation.conversation_history[idx]["message"]["response"] = new_text
-                        conversation.conversation_history = conversation.conversation_history[:idx+1]
-                        st.session_state.run_patient_next = True
-                        del st.session_state.editing_index
-                        st.rerun()
-                with col_b:
-                    if st.button("取消"):
-                        del st.session_state.editing_index
-                        st.rerun()
-            else:
-                del st.session_state.editing_index
+1.  P/I：Perception/Invitation，询问患者对当前情况的认知，这使医生能够确定患者对坏消息的了解程度、期望和接受准备情况。
+2.  K：Knowledge，在患者愿意听的前提下，**按其需求与理解水平**传递关键信息。
+3.  E：Emotions，当患者出现震惊、恐惧、愤怒、否认、哭泣等反应时，**优先处理情绪**，减少孤立感与无助感。
+4.  S：Strategy，把信息收束成可执行计划，让患者知道“接下来做什么、何时做、为什么要做”。
+        """.strip())
+
+        st.subheader("你的任务")
+        st.markdown("""
+1.  告知患者他们的癌症诊断结果和治疗方案。
+2.  你需要根据患者的个人背景画像，调整你的沟通方式（例如受教育水平、性格、经济条件等）。
+3.  如果患者的情绪比较激动，你需要进行安抚。
+4.  你最多只能和患者进行 15 轮对话（每轮指医生和患者各说一次）。
+        """.strip())
+
+        selected_page = st.segmented_control(
+            "翻页",
+            page_labels,
+            default=page_labels[st.session_state.page_idx],
+            selection_mode="single",
+        )
+        st.session_state.page_idx = page_labels.index(selected_page)
+
+        nav1, nav2, nav3 = st.columns([1, 2, 1])
+        with nav1:
+            if st.button("⬅ 上一页", disabled=st.session_state.page_idx == 0):
+                st.session_state.page_idx -= 1
+                st.rerun()
+        with nav2:
+            st.markdown(
+                f"<div style='text-align:center;'>第 {st.session_state.page_idx + 1} / {len(page_labels)} 页</div>",
+                unsafe_allow_html=True,
+            )
+        with nav3:
+            if st.button("下一页 ➡", disabled=st.session_state.page_idx == len(page_labels) - 1):
+                st.session_state.page_idx += 1
+                st.rerun()
 
         st.divider()
 
-        # --- Action Area --- #
-        
-        # Determine who is next
-        next_speaker = "Doctor"
-        if history:
-            last_turn = history[-1]
-            if last_turn["speaker"] == "Doctor":
-                next_speaker = "Patient"
-        
-        # Check max turns
-        current_turns = len(history) // 2 
-        # Note: conversation_history stores individual turns, so len = 2 * rounds approx
-        # "max_turns" usually refers to rounds (pairs).
-        
-        # In conversation.py logic: turn_count = len(self.conversation_history) // 2
-        # while turn_count < self.max_turns:
-        
-        max_turns_reached = (len(history) // 2) >= max_turns
-        if max_turns_reached:
-            conversation.negotiation_result = "max_turns_reached"
-            conversation.negotiation_completed = False
-        
-        # Auto-run Patient if triggered
-        if st.session_state.get("run_patient_next") and not max_turns_reached:
-            with st.spinner("患者正在回复..."):
-                try:
-                    turn = generate_patient_step(conversation)
-                    conversation.conversation_history.append(turn)
-                except Exception as e:
-                    st.error(f"Error generating patient response: {e}")
-                
-            st.session_state.run_patient_next = False
-            st.rerun()
+        # 前五页：显示单个模型对话
+        if st.session_state.page_idx < 5:
+            idx = st.session_state.page_idx
+            label = LABELS[idx]
+            history = conversations_by_label[label].conversation_history
 
-        # Controls
-        if history and history[-1]["speaker"] == "Patient":
-            last_message = history[-1]["message"]
-            if last_message.get("decision") == "reject" or last_message.get("pas_score", 0) < 10 or last_message.get("ess_score", 0) >= 90:
-                st.warning("患者拒绝了医生的建议。")
-                conversation.negotiation_result = "reject"
-                conversation.negotiation_completed = True
-            if last_message.get("decision") == "accept" or last_message.get("pas_score", 0) >= 90:
-                st.success("患者接受了医生的建议。")
-                conversation.negotiation_result = "accept"
-                conversation.negotiation_completed = True
+            st.subheader(f"医生智能体 {label} 与患者的对话")
 
-        if max_turns_reached or conversation.negotiation_completed:
-            st.warning("交互结束。")
-            if st.button("对当前医生进行评价"):
-                result = None
-                with st.spinner("正在评估医生..."):
-                    result = conversation._run_judge_doctor_model()
-                st.markdown("### 医生评估结果")
-                st.json(result)
-            if st.button("保存当前对话"):
-                save_dir = st.text_input("输入保存文件名", value=f"{conversation.file_name}_edited")
-                try:
-                    result = conversation.save_conversation(save_dir)
-                    st.markdown(result)
-                    st.success(f"已保存到 {save_dir}")
-                except Exception as e:
-                    st.error(f"保存失败: {e}")
+            for turn in history[:-1]:
+                speaker = turn["speaker"]
 
-        elif next_speaker == "Doctor":
-            st.subheader("下一轮: 医生")
-            
-            if human_in_the_loop:
-                user_input = st.text_area("输入医生的回复:", key="new_doc_input")
-                if st.button("发送 (人类)"):
-                    if user_input.strip():
-                        turn = {
-                            "speaker": "Doctor",
-                            "message": {
-                                "stage": "human_input",
-                                "analysis": "human_input",
-                                "strategy": "human_input", 
-                                "response": user_input,
-                                "explanation": []
-                            }
-                        }
-                        conversation.conversation_history.append(turn)
-                        st.session_state.run_patient_next = True 
-                        st.rerun()
-            else:
-                if debug_mode:
-                    if st.button("生成 AI 医生回复"):
-                        with st.spinner("医生正在思考..."):
-                            try:
-                                turn = generate_doctor_step(conversation)
-                                conversation.conversation_history.append(turn)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error generating doctor response: {e}")
+                if speaker == "Patient":
+                    with st.chat_message("user", avatar="🧑‍🦲"):
+                        msg = turn.get("message", {})
+                        response_text = msg.get("response", "")
+                        st.markdown(
+                            f"<div class='patient-white'><p class='turn-text'>{response_text}</p></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                elif speaker == "Doctor":
+                    msg = turn.get("message", {})
+                    response_text = msg.get("response", "")
+                    st.markdown(
+                        f'''
+                        <div class="chat-row doctor">
+                            <div class="chat-avatar">
+                            医生{label}👨‍⚕️</div>
+                            <div class="chat-bubble doctor-green">
+                                <p class="turn-text">{response_text}</p>
+                            </div>
+                        </div>
+                        ''',
+                        unsafe_allow_html=True,
+                    )
+
+            st.divider()
+
+            if history and history[-1]["speaker"] == "Patient":
+                last_message = history[-1]["message"]
+                if (
+                    last_message.get("pas_score", 0) < 10
+                    or last_message.get("ess_score", 0) >= 90
+                ):
+                    st.error("患者拒绝了医生的建议。")
+                elif last_message.get("pas_score", 0) >= 90:
+                    st.success("患者接受了医生的建议。")
                 else:
-                    # Automatic generation (No button) if not debug
-                    with st.spinner("医生正在思考 (自动)..."):
-                        try:
-                            turn = generate_doctor_step(conversation)
-                            conversation.conversation_history.append(turn)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error generating doctor response: {e}")
-                            
-        elif next_speaker == "Patient":
-            st.subheader("下一轮: 患者")
-            if debug_mode:
-                if st.button("生成患者回复"):
-                    st.session_state.run_patient_next = True
-                    st.rerun()
-            else:
-                # Should have been handled by auto-run block above,
-                # but if we just arrived here from Doctor turn repaint:
-                st.session_state.run_patient_next = True
-                st.rerun()
+                    st.success("医患沟通已结束。")
+
+        # 最后一页：三个维度分别排序
+        else:
+            st.subheader("评分维度与规则")
+
+            rank_dim_1 = render_rank_editor(DIMENSIONS[0], "1")
+            rank_dim_2 = render_rank_editor(DIMENSIONS[1], "2")
+            rank_dim_3 = render_rank_editor(DIMENSIONS[2], "3")
+
+            if st.button("保存评分结果"):
+                output_dir = Path("result/exp2") / str(st.session_state.name) / "dimension_rankings"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_file = output_dir / f"{st.session_state.file_name.split('.')[0]}.txt"
+
+                with open(output_file, "w", encoding="utf-8") as f:
+                    f.write("维度 1（诊疗过程信息可理解性）:\n")
+                    for i, label in enumerate(rank_dim_1, start=1):
+                        f.write(f"{i}. {label}: {st.session_state.model_map[label]}\n")
+
+                    f.write("\n维度 2（诊疗过程问答合理性）:\n")
+                    for i, label in enumerate(rank_dim_2, start=1):
+                        f.write(f"{i}. {label}: {st.session_state.model_map[label]}\n")
+
+                    f.write("\n维度 3（诊疗过程人文关怀度）:\n")
+                    for i, label in enumerate(rank_dim_3, start=1):
+                        f.write(f"{i}. {label}: {st.session_state.model_map[label]}\n")
+
+                st.success("评分结果已保存！")

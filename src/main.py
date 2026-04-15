@@ -24,19 +24,37 @@ def run_one_file(
     do_eval_patient: bool,
     do_eval_doctor: bool,
     output_dir: str,
-) -> str:
+) -> tuple[str, dict]:
     file_name = input_file.name
     with open(input_file, encoding="utf-8") as f:
         data = json.load(f)
+
+        # 如果 output_dir 中已经存在该文件的结果，则跳过
+        output_path = Path(output_dir)
+        if human_in_the_loop:
+            output_path = output_path / "human"
+        elif is_baseline:
+            output_path = output_path / "cot"
+        else:
+            if has_expert_knowledge:
+                output_path = output_path / "warm"
+            else:
+                output_path = output_path / "framework"
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_file = output_path / file_name
+        if output_file.exists():
+            with open(output_file, encoding="utf-8") as f:
+                result = json.load(f)
+                if result.get("negotiation_result", "error") != "error":
+                    return file_name, {"negotiation_result": "skipped"}
+
         patient_data = {
             "personal_info": data["personal_info"],
             "symptom": data["symptom"],
             "reiterated_symptom": data["reiterated_symptom"],
         }
-        diagnosis_data = {
-            "personal_info": data["personal_info"],
+        examination_data = {
             "symptom": data["symptom"],
-            "physical_examination": data["physical_examination"],
             "auxiliary_examination": data["auxiliary_examination"],
             "diagnosis": data["diagnosis"],
             "treatment": data["treatment"],
@@ -45,7 +63,7 @@ def run_one_file(
         conversation = Conversation(
             file_name=file_name,
             patient_data=patient_data,
-            diagnosis_data=diagnosis_data,
+            examination_data=examination_data,
             patient_model_name=patient_model_name,
             strategy_model_name=strategy_model_name,
             reply_model_name=reply_model_name,
@@ -62,8 +80,8 @@ def run_one_file(
         )
 
         conversation.run_conversation()
-        conversation.save_conversation(output_dir)
-    return file_name
+        result = conversation.save_conversation(output_dir)
+    return file_name, result
 
 def main(
     input_dir: str,
@@ -84,7 +102,7 @@ def main(
     max_workers: int,
 ):
     input_dir = Path(input_dir)
-    input_files = sorted(input_dir.glob("*.json"))
+    input_files = sorted(input_dir.glob("**/*.json"))
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {
@@ -115,9 +133,16 @@ def main(
         for fut in tqdm(as_completed(futures), total=len(futures), desc="Conversations"):
             input_file = futures[fut]
             try:
-                file_name = fut.result()
-                ok += 1
-                # print(f"[OK] {file_name}: {result}")
+                file_name, result = fut.result()
+                if result.get("negotiation_result", "error") == "skipped":
+                    print(f"[SKIP] {file_name}: already exists.")
+                    # pass
+                elif result.get("negotiation_result", "error") != "error":
+                    ok += 1
+                    print(f"[OK] {file_name}: {result}")
+                else:
+                    fail += 1
+                    print(f"[FAIL] {file_name}: Negotiation failed.")
             except Exception as e:
                 fail += 1
                 print(f"[FAIL] {input_file.name}: {repr(e)}")

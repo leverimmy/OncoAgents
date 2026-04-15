@@ -268,7 +268,8 @@ def load_dense_all():
     weights = conf.get("weights_default", {})
     topk_per_field = int(conf.get("topk_per_field_default", 200))
 
-    device = "cuda:6" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     print(f"[INFO] Dense ST device = {device}")
     if device == "cuda":
         print(f"[INFO] GPU = {torch.cuda.get_device_name(0)}")

@@ -44,16 +44,8 @@ if __name__ == '__main__':
     idx = 0
     for ll, education_level in enumerate(EDUCATION_LEVELS):
         for k, financial_status in enumerate(FINANCIAL_STATUSES):
-            if ll == 3 and k <= 1:
-                continue
-            if ll == 4 and k <= 2:
-                continue
             for i, personality in enumerate(PERSONALITIES):
-                if k >= 3 and i == 2:
-                    continue
                 for j, communication_style in enumerate(COMMUNICATION_STYLES):
-                    if j >= 3 and i <= 2:
-                        continue
                     result = {
                         "personal_info": {
                             "social_background": {

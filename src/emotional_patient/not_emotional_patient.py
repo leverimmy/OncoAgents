@@ -12,7 +12,6 @@ class NotEmotionalPatient:
         self.model = LanguageModel(model_name=model_name, url=url)
         self.state = {
             "pas_score": 0,
-            "knowledge": [],
         }
     
     def update_state(self, current_state: dict[str, str]) -> None:
@@ -33,8 +32,6 @@ class NotEmotionalPatient:
             raise ValueError(f"LLM output missing 'response' field: {reply}")
         if "pas_score" not in reply:
             raise ValueError(f"LLM output missing 'pas_score' field: {reply}")
-        if "decision" not in reply:
-            raise ValueError(f"LLM output missing 'decision' field: {reply}")
         logger.info(f"Reply Result: {reply}")
         return reply
 
@@ -53,10 +50,8 @@ class NotEmotionalPatient:
                 logger.error(f"Error in NotEmotionalPatient respond: {e}")
                 if cnt >= 5:
                     return {
-                        "knowledge": [],
                         "pas_analysis": "LLM调用失败，无法分析患者依从度",
                         "pas_score": 0,
-                        "decision": "reject",
                         "response": "很抱歉，我现在无法给出明确的回复。",
                     }
                 logger.info(f"Retrying LLM call, sleep time: {2 ** cnt - 1} seconds")

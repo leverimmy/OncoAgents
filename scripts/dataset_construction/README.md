@@ -12,11 +12,3 @@ uv run python3 main.py \
     --seed 42 \
     --max_workers 8
 ```
-
-Visualize the distribution of generated patient backgrounds:
-
-```bash
-uv run python3 statistics.py \
-    --input_dir ../../data/full \
-    --output_dir ../../data/figs
-```

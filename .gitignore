@@ -1,5 +1,6 @@
 # Environment files
 .env
+.streamlit/
 
 # Virtual environments
 .venv/
@@ -11,6 +12,9 @@ wandb/
 # Data and results
 data/
 results/
+result/
+results-backup/
+figs/
 
 # Cache files
 __pycache__/

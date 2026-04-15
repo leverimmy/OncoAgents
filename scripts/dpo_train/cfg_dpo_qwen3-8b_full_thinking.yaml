@@ -1,0 +1,67 @@
+### model
+model_name_or_path: /ssd/xze/sft/Qwen3-8B/sft-full/20260306
+trust_remote_code: true
+
+### method
+stage: dpo
+do_train: true
+finetuning_type: full
+# lora_rank: 32
+# lora_target: all
+pref_beta: 0.1
+pref_loss: simpo
+
+### dataset
+dataset: dpo_train_o3
+template: qwen3
+cutoff_len: 6144
+max_samples: 7000
+overwrite_cache: true
+preprocessing_num_workers: 8
+dataloader_num_workers: 2
+
+### output
+output_dir: /ssd/xze/dpo/Qwen3-8B/dpo-full/20260306
+logging_steps: 5
+save_steps: 10
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: wandb  # choices: [none, wandb, tensorboard, swanlab, mlflow]
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-6
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+fsdp: "full_shard auto_wrap"
+
+# 重要：FSDP 的细粒度设置放在 fsdp_config（而不是顶层）
+fsdp_config:
+  activation_checkpointing: false         # ← 在 FSDP 里开激活检查点
+  auto_wrap_policy: "transformer_layer"  # ← 让 FSDP 按层自动 wrap
+  backward_prefetch: "BACKWARD_PRE"
+  cpu_offload: true                     # ← 先不开 CPU offload；显存仍紧张再开
+  state_dict_type: "SHARDED_STATE_DICT"     # 也可 "SHARDED_STATE_DICT"，按你保存需求
+
+
+# ### eval
+# eval_dataset: dpo_revise_1202_full7000_eval
+# per_device_eval_batch_size: 1
+# eval_strategy: steps
+# eval_steps: 10
+
+### thinking
+enable_thinking: true
+# disable_gradient_checkpointing: false
+# use_reentrant_gc: true
+flash_attn: fa2
+
+# ref_model: /ssd/xze/sft/Qwen3-8B/sft-full/20260304
+# ref_model_quantization_bit: 4

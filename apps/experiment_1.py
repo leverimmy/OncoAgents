@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,11 @@ import streamlit as st
 sys.path.append(os.path.abspath("../"))
 
 from src.conversation import Conversation
-from src.utils import render_diagnosis_data, render_personal_info, render_user_profile
+from src.utils import (
+    render_diagnosis_data,
+    render_personal_info,
+    render_user_profile,
+)
 
 # Page Config
 st.set_page_config(layout="wide", page_title="OncoAgents 对话")
@@ -20,11 +25,27 @@ DATA_DIR = "../data/full/experiment"
 
 DOCTORS = [d for d in os.listdir(DATA_DIR) if os.path.isdir(os.path.join(DATA_DIR, d))]
 
+random.seed(42)
+
 MAPS = {
     d: sorted([
         f"{f.split(".json")[0]}-{idx}" for f in os.listdir(os.path.join(DATA_DIR, d)) if f.endswith(".json") for idx in range(2)
-    ], key=hash) for d in DOCTORS
+    ],) for d in DOCTORS
 }
+
+for key in MAPS:
+    random.shuffle(MAPS[key])
+
+for key in MAPS:
+    MAPS[key] = sorted(MAPS[key])
+    for idx, _ in enumerate(MAPS[key]):
+        if idx % 2 == 0:
+            if random.random() < 0.5:
+                t = MAPS[key][idx]
+                MAPS[key][idx] = MAPS[key][idx + 1]
+                MAPS[key][idx + 1] = t
+
+# logger.info(MAPS)
 
 def generate_patient_step(conversation: Conversation):
     """Runs one step of patient generation."""
@@ -128,8 +149,8 @@ with st.sidebar:
     st.subheader("参数设置")
 
     is_emotional_patient = True if digit in ["1"] else False
-    # _ = st.checkbox("是否为具有情绪感知的患者智能体", value=is_emotional_patient, disabled=True)
-    max_turns = st.number_input("最长对话轮数", value=15, min_value=1)
+    _ = st.checkbox("是否为具有情绪感知的患者智能体", value=is_emotional_patient, disabled=True)
+    max_turns = st.number_input("最长对话轮数", value=8, min_value=1)
 
     if st.button("初始化 / 重置会话"):
         if "conversation_data" in st.session_state:
@@ -147,7 +168,7 @@ with st.sidebar:
                     "treatment": data["treatment"],
                 }
                 data = {
-                    "file_name": input_file.name,
+                    "file_name": f"{input_file.stem}-{digit}.json",
                     "patient_data": patient_data,
                     "examination_data": examination_data,
                 }
@@ -186,18 +207,18 @@ if "initialized" in st.session_state and st.session_state.initialized:
     # Right Column: Data
     with col_data:
         st.markdown("### 数据面板")
-        with st.container(height=250):
-            with st.expander("患者数据 (Patient Data)", expanded=True):
-                st.write(render_user_profile(conversation.patient_data, "Patient"))
-        with st.container(height=650):
-            with st.expander("患者信息 (Personal Information)", expanded=True):
-                st.write(render_personal_info(conversation.patient_data))
-            with st.expander("诊断数据 (Diagnosis Data)", expanded=True):
-                st.write(
-                    render_diagnosis_data(
-                        conversation.examination_data, with_exams=True
-                    )
+        # with st.container(height=250):
+        with st.expander("患者数据 (Patient Data)", expanded=True):
+            st.write(render_user_profile(conversation.patient_data, "Patient"))
+        # with st.container(height=650):
+        with st.expander("患者信息 (Personal Information)", expanded=True):
+            st.write(render_personal_info(conversation.patient_data))
+        with st.expander("诊断数据 (Diagnosis Data)", expanded=True):
+            st.write(
+                render_diagnosis_data(
+                    conversation.examination_data, with_exams=True
                 )
+            )
 
     # Left Column: Chat & Controls
     with col_chat:
@@ -220,12 +241,13 @@ SPIKES 是“告知重大坏消息”的一种策略。我们将 SPIKES 中的�
 1.  告知患者他们的癌症诊断结果和治疗方案。
 2.  你需要根据患者的个人背景画像，调整你的沟通方式（例如受教育水平、性格、经济条件等）。
 3.  如果患者的情绪比较激动，你需要进行安抚。
+4.  你最多只能和患者进行 8 轮对话（每轮指医生和患者各说一次）。
 在对话完成之后，你需要给患者智能体的表现进行打分。
                     """.strip())
         history = conversation.conversation_history
 
         # Display History
-        for turn in history:
+        for i, turn in enumerate(history):
             speaker = turn["speaker"]
 
             if speaker == "Doctor":
@@ -248,7 +270,7 @@ SPIKES 是“告知重大坏消息”的一种策略。我们将 SPIKES 中的�
                         msg = turn.get("message", {})
                         response_text = msg.get("response", "")
                         st.markdown(
-                            f"<div style='font-size:20px;'>{response_text}</div>",
+                            f"<div style='font-size:20px;'>第{i // 2 + 1}轮：{response_text}</div>",
                             unsafe_allow_html=True,
                         )
 
@@ -322,10 +344,16 @@ SPIKES 是“告知重大坏消息”的一种策略。我们将 SPIKES 中的�
                     index=4 if is_emotional_patient else 0,
                     horizontal=True
                 )
+            
+            st.subheader("反馈")
+            feedback_1 = st.text_input("主观题：你觉得这个患者智能体最拟真的地方在哪里？")
+            feedback_2 = st.text_input("主观题：你觉得这个患者智能体最不拟真的地方在哪里？")
 
             conversation.judge_patient_scores = {
                 m.key: st.session_state.scores[m.key] for m in METRICS
             }
+            conversation.judge_patient_scores["feedback_1"] = feedback_1
+            conversation.judge_patient_scores["feedback_2"] = feedback_2
 
             st.divider()
 
