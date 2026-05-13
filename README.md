@@ -3,6 +3,13 @@
 
 ## Setting Up the Environment
 
+We used Python 3.13 for our codebase. We recommend using [uv](https://docs.astral.sh/uv/) to manage the Python environment and dependencies. To set up the environment, run the following command:
+
+```bash
+uv venv --python 3.13
+uv sync
+```
+
 ## Training the Model
 
 We adopted a two-stage training strategy to train the DPO model. In the first stage, we fine-tuned the Qwen3-8B model on the training data using supervised learning. In the second stage, we further fine-tuned the model using the DPO algorithm.
@@ -106,7 +113,21 @@ Note that if the `--baseline` flag is set, then `--strategy_model`, `--reply_mod
 
 ## Collecting Data
 
+### Frontend Web Interface for *Patient Realism*
 
+At `./apps`, run the following command to start the `streamlit` app for *Patient Realism* evaluation:
+
+```bash
+streamlit run experiment_1.py
+```
+
+### Frontend Web Interface for *Specialist Ranking*
+
+At `./apps`, run the following command to start the `streamlit` app for *Specialist Ranking* evaluation:
+
+```bash
+streamlit run experiment_2.py
+```
 
 ## Reproducing the Results
 
