@@ -19,3 +19,6 @@ figs/
 # Cache files
 __pycache__/
 .ruff_cache/
+
+# MacOS files
+.DS_Store
