@@ -21,9 +21,13 @@ cp .env.example .env
 
 The code is developed and tested on a Linux system with the following specifications:
 
-- OS: Ubuntu 22.04 LTS (Linux 5.15.0-91-generic)
-- CPU: Intel Xeon Platinum 8336C
-- GPU: NVIDIA A100 80GB (8 GPUs)
+-   OS: Ubuntu 22.04 LTS (Linux 5.15.0-91-generic)
+-   CPU: Intel Xeon Platinum 8336C
+-   GPU: NVIDIA A100 80GB (8 GPUs)
+
+## Preparing the Data
+
+
 
 ## Training the Model
 
@@ -74,6 +78,8 @@ export WANDB_PROJECT=""
 
 llamafactory-cli train ./cfg_dpo_qwen3-8b_full_thinking.yaml
 ```
+
+The trained DPO model for reference can be found at Hugging Face: [leverimmy/Qwen3-8B-DPO](https://huggingface.co/leverimmy/Qwen3-8B-DPO).
 
 ## Running the Code
 
@@ -145,3 +151,14 @@ streamlit run experiment_2.py
 ```
 
 ## Reproducing the Results
+
+### Figure 
+
+
+
+### Figure 
+
+
+
+### Figure
+
