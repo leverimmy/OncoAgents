@@ -152,13 +152,42 @@ streamlit run experiment_2.py
 
 ## Reproducing the Results
 
-### Figure 
+### Figure 2
 
 
 
-### Figure 
+### Figure 3
+
+At `./scripts/experiments`, run the following command to reproduce Figure 3c-g:
+
+```bash
+uv run python3 fig3_c-g.py
+```
+
+At `./scripts/experiments`, run the following command to reproduce Figure 3i:
+
+```bash
+uv run python3 fig3_i.py
+```
+
+Figure 3c-g, 3i will be saved in the directory `./results/figs/`.
+
+### Specialist Ranking
+
+At `./scripts/experiments`, run the following command to reproduce the specialist ranking results:
+
+```bash
+uv run python3 specialist_ranking.py \
+    --input_dir ../../results/experiment_2/specialists \
+    --agent_root ../../results/experiment_2/agents \
+    --n_bootstrap 5000 \
+    --seed 42
+```
+
+### Figure 4/5
 
 
 
-### Figure
+### Figure 6
+
 
